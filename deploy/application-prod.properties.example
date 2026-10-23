@@ -1,0 +1,17 @@
+# 每日战报系统 正式环境配置模板
+#
+# 放到服务器：F:\DailyReport\App\config\application-prod.properties
+# （install-on-server.ps1 第一次安装时会自动复制一份过去；之后部署不会再覆盖它）
+# 这个文件只在服务器本机维护，真实密码不要提交到 git。
+#
+# 改完后重启服务：Restart-Service DailyReport-Backend
+
+# ---- 数据库：跟 Dashboard 同一台服务器上的 SQL Server（实例 SQLS2022），库名 DailyReport ----
+# 实例名如果跟这里不一样，改 instanceName；用默认实例的话把 ;instanceName=SQLS2022 整段删掉
+spring.datasource.url=jdbc:sqlserver://localhost;instanceName=SQLS2022;databaseName=DailyReport;encrypt=true;trustServerCertificate=true
+spring.datasource.username=sa
+# 【必须改】换成服务器上数据库的真实密码
+spring.datasource.password=请改成正式数据库密码
+
+# ---- 图片默认存储路径（之后也可以由系统管理员在“系统设置”页面修改）----
+app.upload-dir=F:/DailyReport/Storage/uploads

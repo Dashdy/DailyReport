@@ -1,0 +1,80 @@
+/* 全局基础样式 + 跟截图一致的配色 */
+:root {
+  --dr-navy: #001529;          /* 侧边栏 */
+  --dr-blue: #0070c0;          /* 保证书 / 走势表表头蓝 */
+  --dr-blue-bright: #1874cd;   /* 班组看板蓝 */
+  --dr-sheet-green: #d5ead6;   /* 走势表浅绿底 */
+  --dr-pass: #2e9e5b;
+  --dr-pass-bg: #e3f4e8;
+  --dr-fail: #e23b3b;
+  --dr-fail-bg: #fde6e6;
+  --dr-empty: #909399;
+  --dr-page-bg: #f0f2f5;
+  --dr-border: #c9d3dd;
+}
+
+html, body, #app {
+  margin: 0;
+  height: 100%;
+  font-family: "Microsoft YaHei", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  color: #1f2d3d;
+  background: var(--dr-page-bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* 页面顶部横幅：深蓝 → 亮蓝渐变（截图 2 的“MES 播报看板”样式） */
+.page-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 18px 28px;
+  margin-bottom: 20px;
+  border-radius: 6px;
+  color: #fff;
+  background: linear-gradient(90deg, #0f1f45 0%, #1e3a8a 45%, #3b82f6 100%);
+}
+
+.page-banner .crumb {
+  font-size: 13px;
+  opacity: 0.85;
+}
+
+.page-banner h1 {
+  margin: 4px 0 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.page-banner .banner-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.panel {
+  background: #fff;
+  border-radius: 6px;
+  padding: 18px 20px;
+  box-shadow: 0 1px 4px rgba(0, 21, 41, 0.08);
+}
+
+.panel-title {
+  margin: 0 0 14px;
+  font-size: 16px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}

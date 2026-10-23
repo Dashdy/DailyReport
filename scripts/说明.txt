@@ -1,0 +1,84 @@
+================================================================================
+DailyReport（每日战报系统）部署说明
+================================================================================
+
+正式服务器：10.10.99.5（跟 Dashboard 同一台 Windows 服务器）
+访问地址：  http://10.10.99.5:8085
+
+| 项目       | Dashboard（已有）              | DailyReport                                   |
+|------------|--------------------------------|-----------------------------------------------|
+| 网页端口   | 80                             | 8085（Nginx 新增一个 server 块）              |
+| 后端服务   | WellTek-Backend（8082）        | DailyReport-Backend（8083，只在本机监听）     |
+| 服务器目录 | F:\WellTek\                    | F:\DailyReport\                               |
+| 数据库     | WellTek                        | DailyReport（同一个 SQL Server 实例 SQLS2022）|
+
+服务器目录结构：
+  F:\DailyReport\App\DailyReport.jar                      后端程序
+  F:\DailyReport\App\config\application-prod.properties   正式配置（数据库密码），只在服务器维护
+  F:\DailyReport\wwwroot\dist\                            前端网页（Nginx 托管）
+  F:\DailyReport\Storage\uploads\                         上传的照片（系统设置里可以改路径）
+  F:\DailyReport\Logs\backend.log                         后端日志（10MB 自动轮换）
+
+
+--------------------------------------------------------------------------------
+一、第一次安装：install-on-server.ps1（只跑一次）
+--------------------------------------------------------------------------------
+
+在开发机上，用【管理员身份】打开 PowerShell：
+    cd D:\WellTek\Projects\DailyReport
+    .\scripts\install-on-server.ps1
+
+会弹出密码框，填服务器本机管理员账号密码（跟部署 Dashboard 时一样）。
+脚本会：本地打包 → 建服务器目录 → 推送程序和网页 → 建 DailyReport 数据库 →
+用 Dashboard 同一个 nssm / java 注册 DailyReport-Backend 服务（开机自启）→
+防火墙放行 8085 → 把 deploy\nginx\dailyreport.conf 放进 Nginx 的 conf\conf.d\ 并 reload。
+
+第一次跑完会提示“数据库密码还没填”，这是正常的：
+  1. 在服务器上打开 F:\DailyReport\App\config\application-prod.properties，
+     把 spring.datasource.password= 后面改成数据库真实密码
+     （以后改 sa 密码，也只改这一个文件，然后重启服务）
+  2. 在服务器上执行：Start-Service DailyReport-Backend
+  3. 浏览器打开 http://10.10.99.5:8085
+
+正式库第一次启动是空库，会自动建表并写入：
+  - 初始账号：系统管理员 / admin（系统管理员）、叶丰龙 / 0625（管理员）
+    （账号 / 密码；只在用户表为空时创建，登录后请马上改密码）
+  - 25 道默认工序和每道工序的六项默认目标
+
+
+--------------------------------------------------------------------------------
+二、以后更新代码：deploy-to-prod.ps1
+--------------------------------------------------------------------------------
+
+    .\scripts\deploy-to-prod.ps1
+
+只换后端 jar 和前端网页，不碰正式配置、不碰数据库。表结构有新增时，后端启动会自动补上
+（db/schema.sql 表不存在才建，SchemaMigrator.java 负责老表加列），不需要手动跑 SQL。
+
+两个脚本都会先在本机打包，打包前请先关掉本机正在调试的 DailyReport 后端，
+否则 mvnw clean 删不掉被占用的 jar。
+
+
+--------------------------------------------------------------------------------
+三、开发机本地运行
+--------------------------------------------------------------------------------
+
+后端：Backend\backend 目录下运行（IDEA 或 mvnw spring-boot:run），端口 8083
+      本地数据库密码放在 Backend\backend\config\application-local.properties
+      （已在 .gitignore 里，不会提交；新电脑上照下面这样新建一个）：
+          spring.datasource.password=本机数据库密码
+      编译需要 JDK 17（这台机器的 JAVA_HOME 是 JDK 8，用 Maven 编译时临时设成
+      D:\WellTek\SoftWare\JDK\Install\jdk-17.0.19）
+前端：Frontend\frontend 目录下 npm run serve，端口 8084
+
+
+--------------------------------------------------------------------------------
+四、注意
+--------------------------------------------------------------------------------
+
+- 这些 .ps1 文件含中文，必须保存成【UTF-8 带 BOM】，否则 Windows PowerShell 5.1 会按 GBK
+  读成乱码，报出“缺少右大括号”之类莫名其妙的语法错误（Dashboard 那边踩过）。
+- 两个脚本都还没有在正式服务器上实际跑过（只在本机检查过语法、模拟过正式环境启动），
+  第一次安装时请留意每一步的输出；任何一步出错脚本会停下来，不会带着半成品继续。
+- 数据库和照片目前没有配置定时备份，可以参考 Dashboard 的
+  scripts\server-local\backup-welltek-db.ps1 加一个。
