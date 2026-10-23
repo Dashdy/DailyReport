@@ -84,16 +84,12 @@ CREATE TABLE dbo.DAILY_SNAPSHOT (
     INDEX IX_DAILY_SNAPSHOT (PROCESS_ID, REPORT_DATE)
 );
 
--- 四功能小组名字&照片 / 本组三条动作 / 组员签名照片栏 / 全员签名
+-- 班组看板：四功能小组四个人的照片、姓名、职能 + 全员签名 + 日期
+-- （早期版本的 GROUP_NAME / GROUP_PHOTO / ACTION1~3 / MEMBER_PHOTO 列在老库里保留不删，页面不再使用）
 IF OBJECT_ID('dbo.PROCESS_BOARD', 'U') IS NULL
 CREATE TABLE dbo.PROCESS_BOARD (
     PROCESS_ID    INT           PRIMARY KEY,
-    GROUP_NAME    NVARCHAR(100) NULL,
-    GROUP_PHOTO   NVARCHAR(500) NULL,
-    ACTION1       NVARCHAR(500) NULL,
-    ACTION2       NVARCHAR(500) NULL,
-    ACTION3       NVARCHAR(500) NULL,
-    MEMBER_PHOTO  NVARCHAR(500) NULL,
+    MEMBERS       NVARCHAR(MAX) NULL,   -- 四功能小组四个人：[{photo, name, role}]（JSON）
     SIGNERS       NVARCHAR(500) NULL,
     SIGN_DATE     DATE          NULL,
     UPDATED_BY    NVARCHAR(50)  NULL,

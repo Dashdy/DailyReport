@@ -30,7 +30,8 @@ public final class Requests {
     }
 
     /** 系统设置：数据锁定时间，HH:mm */
-    public record SaveLockTime(String lockTime) {
+    /** lockDay：0 = 当天，1 = 次日 */
+    public record SaveLockTime(String lockTime, Integer lockDay) {
     }
 
     /** 系统设置：锁定开关 / 历史数据锁定开关 */
@@ -57,7 +58,10 @@ public final class Requests {
     public record SaveRecords(List<Cell> cells) {
     }
 
-    public record SaveBoard(String groupName, String groupPhoto, String action1, String action2,
-                            String action3, String memberPhoto, String signers, LocalDate signDate) {
+    /** 班组看板：四功能小组四个人 + 全员签名 + 日期 */
+    public record SaveBoard(List<BoardMember> members, String signers, LocalDate signDate) {
+    }
+
+    public record BoardMember(String photo, String name, String role) {
     }
 }

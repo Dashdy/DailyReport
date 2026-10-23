@@ -20,6 +20,21 @@ public class SchemaMigrator {
 
     public void migrate() {
         addUserAccount();
+        addBoardMembers();
+    }
+
+    /**
+     * 2026-10-23：班组看板改成“四功能小组四个人的照片 + 姓名 + 职能”，新增 MEMBERS 列（JSON）。
+     * 原来的小组名字、三条动作、组员签名照片列保留在库里不删，页面不再显示。
+     */
+    private void addBoardMembers() {
+        Integer exists = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM sys.columns WHERE object_id = OBJECT_ID('dbo.PROCESS_BOARD') AND name = 'MEMBERS'", Integer.class);
+        if (exists != null && exists > 0) {
+            return;
+        }
+        jdbcTemplate.execute("ALTER TABLE dbo.PROCESS_BOARD ADD MEMBERS NVARCHAR(MAX) NULL");
+        log.info("已升级班组看板表：新增 MEMBERS（四功能小组成员）列");
     }
 
     /**

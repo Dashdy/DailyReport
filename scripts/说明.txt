@@ -73,7 +73,32 @@ DailyReport（每日战报系统）部署说明
 
 
 --------------------------------------------------------------------------------
-四、注意
+四、每天自动备份：install-backup-task.ps1
+--------------------------------------------------------------------------------
+
+在开发机上【管理员身份】PowerShell 里运行一次：
+    .\scripts\install-backup-task.ps1
+
+会在服务器上装好任务计划 DailyReport-Backup，每天 2:30（Dashboard 的备份在 2:00）用 SYSTEM 账号运行
+F:\DailyReport\Tools\backup-dailyreport.ps1：
+  - 数据库 → F:\DailyReport\Storage\SQLBackup\DailyReport_日期_时间.bak，保留 14 天
+  - 照片   → F:\DailyReport\Storage\UploadsBackup\（只增不删）
+  - 记录   → F:\DailyReport\Logs\backup.log
+脚本最后会马上试跑一次并显示结果。以后想手动备份一次：在服务器上
+    Start-ScheduledTask -TaskName DailyReport-Backup
+
+恢复数据库（会覆盖当前数据，先停后端）：
+    Stop-Service DailyReport-Backend
+    sqlcmd -S localhost\SQLS2022 -E -C -Q "ALTER DATABASE DailyReport SET SINGLE_USER WITH ROLLBACK IMMEDIATE; RESTORE DATABASE DailyReport FROM DISK = N'F:\DailyReport\Storage\SQLBackup\DailyReport_xxxx.bak' WITH REPLACE; ALTER DATABASE DailyReport SET MULTI_USER"
+    Start-Service DailyReport-Backend
+恢复照片：把 UploadsBackup 里的文件夹复制回照片存储路径（默认 F:\DailyReport\Storage\uploads）。
+
+备份和数据库在同一台服务器上：防得住误删数据、系统盘重装，防不住服务器整机损坏。
+需要的话再把 SQLBackup 和 UploadsBackup 定期拷到别的机器。
+
+
+--------------------------------------------------------------------------------
+五、注意
 --------------------------------------------------------------------------------
 
 - 这些 .ps1 文件含中文，必须保存成【UTF-8 带 BOM】，否则 Windows PowerShell 5.1 会按 GBK

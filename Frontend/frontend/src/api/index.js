@@ -43,7 +43,7 @@ export default {
   storage: () => get('/api/settings/storage'),
   saveStorage: body => put('/api/settings/storage', body),
   lockSetting: () => get('/api/settings/lock'),
-  saveLockSetting: lockTime => put('/api/settings/lock', { lockTime }),
+  saveLockSetting: (lockTime, lockDay) => put('/api/settings/lock', { lockTime, lockDay }),
   saveLockEnabled: enabled => put('/api/settings/lock/enabled', { enabled }),
   saveHistoryLock: enabled => put('/api/settings/lock/history', { enabled }),
 

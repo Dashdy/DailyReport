@@ -15,6 +15,7 @@
       <div class="banner-tools">
         <el-date-picker id="detail-month" v-model="month" type="month" value-format="YYYY-MM" :clearable="false"
                         :disabled-date="dt => dt > new Date()" @change="onMonthChange" />
+        <el-button :icon="TrendCharts" type="primary" @click="router.push({ path: `/processes/${processId}/carousel`, query: { month } })">查看趋势图</el-button>
         <el-button :icon="Clock" @click="openHistory">修改记录 / 留底</el-button>
       </div>
     </div>
@@ -52,10 +53,10 @@
           </tbody>
         </table>
 
-        <!-- 四功能小组 / 三条动作 / 组员签名照片栏 -->
+        <!-- 四功能小组：四个人的照片、姓名、职能 -->
         <div class="board">
           <div class="board-head">
-            <span>四功能小组 / 本组三条动作 / 组员签名照片栏</span>
+            <span>四功能小组</span>
             <template v-if="d.canEdit">
               <el-button v-if="!boardEditing" size="small" @click="startBoardEdit">编辑</el-button>
               <span v-else class="board-btns">
@@ -65,36 +66,33 @@
             </template>
           </div>
           <div class="board-body">
-            <div class="board-col">
-              <div class="board-label">小组名字 &amp; 照片</div>
-              <el-input v-if="boardEditing" id="board-group-name" v-model="board.groupName" placeholder="四功能小组名字" maxlength="100" />
-              <div v-else class="board-text strong">{{ board.groupName || '（未填写小组名字）' }}</div>
-              <ImageUpload v-model="board.groupPhoto" :editable="boardEditing" placeholder="小组照片" />
-            </div>
-            <div class="board-col actions-col">
-              <div class="board-label">本组三条动作</div>
-              <div v-for="i in 3" :key="i" class="action-item">
-                <span class="action-no">{{ i }}</span>
-                <el-input v-if="boardEditing" :id="'board-action-' + i" v-model="board['action' + i]" type="textarea"
-                          :autosize="{ minRows: 1, maxRows: 3 }" maxlength="500" :placeholder="'动作 ' + i" />
-                <span v-else class="board-text">{{ board['action' + i] || '（未填写）' }}</span>
-              </div>
-            </div>
-            <div class="board-col">
-              <div class="board-label">组员签名照片</div>
-              <ImageUpload v-model="board.memberPhoto" :editable="boardEditing" placeholder="组员签名照片" />
+            <div v-for="(m, i) in board.members" :key="i" class="member">
+              <ImageUpload v-model="m.photo" :editable="boardEditing" :placeholder="'成员 ' + (i + 1) + ' 照片'" />
+              <template v-if="boardEditing">
+                <el-input :id="'board-member-name-' + i" v-model="m.name" size="small" placeholder="姓名" maxlength="20" />
+                <el-input :id="'board-member-role-' + i" v-model="m.role" size="small" placeholder="职能，如：安全" maxlength="20" />
+              </template>
+              <template v-else>
+                <div class="member-name">{{ m.name || '（未填写姓名）' }}</div>
+                <div class="member-role">{{ m.role || '职能未填' }}</div>
+              </template>
             </div>
           </div>
         </div>
 
-        <div class="sign-row">
-          <span>全员签名：</span>
-          <el-input v-if="boardEditing" id="board-signers" v-model="board.signers" class="sign-input" placeholder="组员姓名，用空格隔开" maxlength="500" />
-          <span v-else class="sign-line">{{ board.signers }}</span>
-          <span class="sign-date-label">日期：</span>
-          <el-date-picker v-if="boardEditing" id="board-sign-date" v-model="board.signDate" type="date"
-                          value-format="YYYY-MM-DD" size="small" style="width: 140px" />
-          <span v-else class="num">{{ board.signDate ? board.signDate.replaceAll('-', '.') : '' }}</span>
+        <!-- 全员签名、日期：上下两行 -->
+        <div class="sign-block">
+          <div class="sign-row">
+            <span class="sign-label">全员签名：</span>
+            <el-input v-if="boardEditing" id="board-signers" v-model="board.signers" class="sign-input" placeholder="组员姓名，用空格隔开" maxlength="500" />
+            <span v-else class="sign-line">{{ board.signers }}</span>
+          </div>
+          <div class="sign-row">
+            <span class="sign-label">日期：</span>
+            <el-date-picker v-if="boardEditing" id="board-sign-date" v-model="board.signDate" type="date"
+                            value-format="YYYY-MM-DD" class="sign-input" style="width: 100%" />
+            <span v-else class="sign-line num">{{ board.signDate ? board.signDate.replaceAll('-', '.') : '' }}</span>
+          </div>
         </div>
         <div v-if="d.board && d.board.updatedBy" class="board-meta">
           看板最后保存：{{ d.board.updatedBy }} · {{ fmtTime(d.board.updatedAt) }}
@@ -253,7 +251,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Clock } from '@element-plus/icons-vue'
+import { Clock, TrendCharts } from '@element-plus/icons-vue'
 import api from '@/api'
 import EChart from '@/components/EChart.vue'
 import ImageUpload from '@/components/ImageUpload.vue'
@@ -286,24 +284,37 @@ const dateOf = day => `${month.value}-${String(day).padStart(2, '0')}`
 // “今天”以服务器日期为准（后端也按服务器日期判断），没加载到时先用本机日期
 const serverToday = computed(() => (d.value && d.value.today ? String(d.value.today) : today))
 const isFuture = day => dateOf(day) > serverToday.value
+/** 服务器“昨天”的日期 yyyy-MM-dd */
+const serverYesterday = computed(() => {
+  const [y, m, dd] = serverToday.value.split('-').map(Number)
+  const t = new Date(y, m - 1, dd - 1)
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
+})
+
 /**
- * 负责人视角的锁定（规则在“系统设置”里配置，后端也按同样规则拦截）：
- * - 历史数据锁定开启 → 前一天及以前锁定；
- * - 锁定开关开启 → 到当天锁定时间，今天的也锁定（ownerTodayEditable = false）。
+ * 负责人视角的锁定（规则在“系统设置 → 数据锁定”里配置，后端按同样规则拦截）：
+ * - 今天：ownerTodayEditable（当天锁定时间开关开着且过了“当天 xx:xx”就锁）；
+ * - 昨天：历史数据锁定关着就能改；开着的话，只有“次日 xx:xx”之前能改（ownerYesterdayEditable）；
+ * - 更早：历史数据锁定开着就锁。
  * 系统管理员 / 管理员（canEditPast）不受限制。
  */
 const isLocked = day => {
   if (isFuture(day) || !d.value || d.value.canEditPast) return false
-  return dateOf(day) < serverToday.value ? d.value.historyLock : !d.value.ownerTodayEditable
+  const date = dateOf(day)
+  if (date === serverToday.value) return !d.value.ownerTodayEditable
+  if (date === serverYesterday.value) return !d.value.ownerYesterdayEditable
+  return d.value.historyLock
 }
 
 const lockTip = computed(() => {
   const v = d.value
   if (!v || !v.canEdit || v.canEditPast || (!v.historyLock && !v.lockEnabled)) return ''
-  const past = v.historyLock ? '之前的数据已锁定' : '之前的数据可以修改'
-  const todayPart = !v.lockEnabled ? '今天全天可填'
-    : v.ownerTodayEditable ? `今天的数据 ${v.lockTime} 锁定` : `今天的数据已于 ${v.lockTime} 锁定`
-  return `${todayPart}；${past}；需要更正请联系管理员`
+  const parts = []
+  if (!v.lockEnabled) parts.push('今天全天可填')
+  else parts.push(v.ownerTodayEditable ? `今天的数据${v.lockRule}锁定` : `今天的数据已按“${v.lockRule}”锁定`)
+  if (v.historyLock && v.ownerYesterdayEditable) parts.push(`昨天的数据还能补填（${v.lockRule}锁定）`)
+  parts.push(v.historyLock ? '更早的数据已锁定' : '以前的数据可以修改')
+  return parts.join('；') + '；需要更正请联系管理员'
 })
 const isEditable = day => !!d.value && d.value.canEdit && !isFuture(day) && !isLocked(day)
 
@@ -469,15 +480,22 @@ async function saveTargets() {
   }
 }
 
-// ---------------- 班组看板 ----------------
-const board = reactive({})
+// ---------------- 班组看板：四功能小组四个人 + 全员签名 + 日期 ----------------
+const board = reactive({ members: [], signers: '', signDate: '' })
 const boardEditing = ref(false)
 const savingBoard = ref(false)
-const BOARD_FIELDS = ['groupName', 'groupPhoto', 'action1', 'action2', 'action3', 'memberPhoto', 'signers', 'signDate']
 
 function resetBoard() {
   const b = d.value.board || {}
-  for (const f of BOARD_FIELDS) board[f] = b[f] || ''
+  const saved = b.members || []
+  // 固定显示 4 个位置，没填的位置空着
+  board.members = Array.from({ length: 4 }, (_, i) => ({
+    photo: (saved[i] && saved[i].photo) || '',
+    name: (saved[i] && saved[i].name) || '',
+    role: (saved[i] && saved[i].role) || ''
+  }))
+  board.signers = b.signers || ''
+  board.signDate = b.signDate || ''
 }
 
 function startBoardEdit() {
@@ -493,7 +511,11 @@ watch(boardEditing, editing => {
 async function saveBoard() {
   savingBoard.value = true
   try {
-    const body = Object.fromEntries(BOARD_FIELDS.map(f => [f, board[f] || null]))
+    const body = {
+      members: board.members.map(m => ({ photo: m.photo || null, name: m.name || null, role: m.role || null })),
+      signers: board.signers || null,
+      signDate: board.signDate || null
+    }
     const res = await api.saveBoard(processId, body)
     if (!res.success) {
       ElMessage.error(res.message)
@@ -718,86 +740,92 @@ function shortVal(v) {
   gap: 6px;
 }
 
+/* 四功能小组：四个人一排，每人 照片 + 姓名 + 职能；窄屏两两一排 */
 .board-body {
   display: grid;
-  grid-template-columns: 1fr 1.3fr 1fr;
-  gap: 14px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
   padding: 14px;
 }
 
 @media (max-width: 640px) {
   .board-body {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-.board-col {
+.member {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
+  text-align: center;
 }
 
-.board-label {
-  font-size: 12px;
-  opacity: 0.8;
+/* 人像照片用竖版比例 */
+.member :deep(.img),
+.member :deep(.placeholder) {
+  aspect-ratio: 3 / 4;
 }
 
-.board-text {
-  font-size: 13px;
-  line-height: 1.5;
-  word-break: break-all;
+.member :deep(.actions) {
+  justify-content: center;
 }
 
-.board-text.strong {
+.member-name {
   font-size: 15px;
   font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.action-item {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-}
-
-.action-no {
-  flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: #fff;
-  color: var(--dr-blue-bright);
+.member-role {
+  align-self: center;
+  max-width: 100%;
+  padding: 0 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.2);
   font-size: 12px;
-  font-weight: 700;
+  line-height: 20px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 全员签名、日期：上下两行 */
+.sign-block {
   display: grid;
-  place-items: center;
+  gap: 14px;
+  padding: 18px 14px 8px;
+  background: #f5f8fa;
 }
 
 .sign-row {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  align-items: flex-end;
   gap: 6px;
-  padding: 18px 14px 6px;
-  background: #f5f8fa;
   font-size: 14px;
   color: #4a5562;
 }
 
+.sign-label {
+  flex-shrink: 0;
+  width: 5em;
+  text-align: right;
+}
+
 .sign-line {
   flex: 1;
-  min-width: 140px;
+  min-width: 0;
   min-height: 22px;
   border-bottom: 1px solid #333;
+  color: #1f2d3d;
 }
 
 .sign-input {
   flex: 1;
-  min-width: 160px;
-}
-
-.sign-date-label {
-  margin-left: 12px;
+  min-width: 0;
 }
 
 .board-meta {

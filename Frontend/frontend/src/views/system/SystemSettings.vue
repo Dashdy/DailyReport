@@ -20,7 +20,7 @@
           <div class="lock-row">
             <div class="lock-main">
               <div class="lock-name">历史数据锁定</div>
-              <div class="lock-desc">开启后，前一天及以前的数据负责人不能修改。</div>
+              <div class="lock-desc">开启后，前一天及以前的数据负责人不能修改（锁定时间设为“次日”时，前一天的数据在锁定时间前仍可补填）。</div>
               <div v-if="lock.historyUpdatedBy" class="lock-meta">最后操作：{{ lock.historyUpdatedBy }} · {{ fmtTime(lock.historyUpdatedAt) }}</div>
             </div>
             <el-switch id="setting-history-lock" :model-value="lock.historyLock" :loading="switching === 'history'"
@@ -28,23 +28,32 @@
                        @change="v => toggle('history', v)" />
           </div>
 
-          <!-- 当天锁定时间 -->
+          <!-- 锁定时间（当天 / 次日） -->
           <div class="lock-row">
             <div class="lock-main">
               <div class="lock-name">
-                当天锁定时间
+                锁定时间
                 <el-tag v-if="!isSysAdmin" size="small" type="info">时间仅系统管理员可修改</el-tag>
               </div>
               <div class="lock-desc">
-                开启后，每天到 <b class="num">{{ lock.lockTime }}</b> 锁定当天的数据，负责人不能再填写或修改；关闭则当天全天可填。
+                开启后，每天的数据到 <b class="num">{{ lock.lockRule }}</b> 锁定，负责人不能再填写或修改；关闭则当天全天可填。
+              </div>
+              <div class="lock-desc example">
+                <template v-if="lock.lockDay === 1">例：23 号的数据，负责人可以填到 24 号 {{ lock.lockTime }}（适合夜班第二天早上补填）。</template>
+                <template v-else>例：23 号的数据，23 号 {{ lock.lockTime }} 以后负责人就不能再改。</template>
               </div>
               <div v-if="lock.enabledUpdatedBy" class="lock-meta">开关最后操作：{{ lock.enabledUpdatedBy }} · {{ fmtTime(lock.enabledUpdatedAt) }}</div>
               <div v-if="lock.updatedBy" class="lock-meta">时间最后修改：{{ lock.updatedBy }} · {{ fmtTime(lock.updatedAt) }}</div>
               <div v-if="isSysAdmin" class="lock-time-edit">
+                <el-select id="setting-lock-day" v-model="newLockDay" style="width: 90px">
+                  <el-option label="当天" :value="0" />
+                  <el-option label="次日" :value="1" />
+                </el-select>
                 <el-time-picker id="setting-lock-time" v-model="newLockTime" format="HH:mm" value-format="HH:mm"
                                 placeholder="选择时间" :clearable="false" style="width: 140px" />
                 <el-button type="primary" :loading="savingLock"
-                           :disabled="!newLockTime || newLockTime === lock.lockTime" @click="saveLock">保存锁定时间</el-button>
+                           :disabled="!newLockTime || (newLockTime === lock.lockTime && newLockDay === lock.lockDay)"
+                           @click="saveLock">保存锁定时间</el-button>
               </div>
             </div>
             <el-switch id="setting-lock-enabled" :model-value="lock.enabled" :loading="switching === 'time'"
@@ -56,7 +65,8 @@
         <div class="lock-now">
           此刻负责人：
           <span :class="lock.ownerTodayEditable ? 'ok' : 'locked'">{{ lock.ownerTodayEditable ? '可以填写今天的数据' : '今天的数据已锁定' }}</span>；
-          <span :class="lock.historyLock ? 'locked' : 'ok'">{{ lock.historyLock ? '以前的数据已锁定' : '以前的数据可以修改' }}</span>
+          <span :class="lock.ownerYesterdayEditable ? 'ok' : 'locked'">{{ lock.ownerYesterdayEditable ? '昨天的数据还能补填' : '昨天的数据已锁定' }}</span>；
+          <span :class="lock.historyLock ? 'locked' : 'ok'">{{ lock.historyLock ? '更早的数据已锁定' : '以前的数据可以修改' }}</span>
         </div>
       </template>
     </div>
@@ -137,10 +147,11 @@ const migrate = ref(true)
 
 const lock = ref(null)
 const newLockTime = ref('')
+const newLockDay = ref(0) // 0 = 当天，1 = 次日
 const savingLock = ref(false)
 const switching = ref('')
 
-/** 拨开关：history = 历史数据锁定，time = 当天锁定时间 */
+/** 拨开关：history = 历史数据锁定，time = 锁定时间 */
 async function toggle(which, enabled) {
   switching.value = which
   try {
@@ -165,6 +176,7 @@ async function load() {
     if (l.success) {
       lock.value = l.data
       newLockTime.value = l.data.lockTime
+      newLockDay.value = l.data.lockDay
     }
   } finally {
     loading.value = false
@@ -173,7 +185,8 @@ async function load() {
 
 async function saveLock() {
   try {
-    await ElMessageBox.confirm(`改为每天 ${newLockTime.value} 锁定当天数据？保存后立即生效。`, '修改锁定时间', {
+    const rule = (newLockDay.value === 1 ? '次日 ' : '当天 ') + newLockTime.value
+    await ElMessageBox.confirm(`改为每天的数据在“${rule}”锁定？保存后立即生效。`, '修改锁定时间', {
       type: 'warning', confirmButtonText: '确定修改'
     })
   } catch {
@@ -181,7 +194,7 @@ async function saveLock() {
   }
   savingLock.value = true
   try {
-    const res = await api.saveLockSetting(newLockTime.value)
+    const res = await api.saveLockSetting(newLockTime.value, newLockDay.value)
     if (!res.success) {
       ElMessage.error(res.message)
       return
@@ -269,6 +282,11 @@ function fmtSize(bytes) {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.lock-desc.example {
+  color: #8a96a3;
+  font-size: 12px;
 }
 
 .lock-desc {

@@ -8,6 +8,8 @@ const routes = [
   { path: '/', component: () => import('@/views/home/HomePage.vue'), meta: { title: '全厂达标汇总', icon: 'DataAnalysis', menu: 'report' } },
   { path: '/processes', component: () => import('@/views/process/ProcessHub.vue'), meta: { title: '工序战报', icon: 'Grid', menu: 'report' } },
   { path: '/processes/:id', component: () => import('@/views/process/ProcessDetail.vue'), meta: { title: '工序详情', activeMenu: '/processes' } },
+  // 工序趋势图轮播大屏（工序详情页“查看趋势图”进入）：不套侧边栏，登录用户都能看
+  { path: '/processes/:id/carousel', component: () => import('@/views/process/ProcessCarousel.vue'), meta: { title: '趋势图轮播', standalone: true } },
   { path: '/system/users', component: () => import('@/views/system/UserManage.vue'), meta: { title: '用户管理', icon: 'User', menu: 'system', admin: true } },
   { path: '/system/assign', component: () => import('@/views/system/ProcessAssign.vue'), meta: { title: '工序负责人分配', icon: 'Connection', menu: 'system', admin: true } },
   { path: '/system/processes', component: () => import('@/views/system/ProcessConfig.vue'), meta: { title: '工序配置', icon: 'SetUp', menu: 'system', admin: true } },

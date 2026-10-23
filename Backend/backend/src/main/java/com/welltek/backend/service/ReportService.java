@@ -93,12 +93,15 @@ public class ReportService {
         result.put("process", Map.of("id", p.id(), "name", p.name(), "active", p.active()));
         result.put("owners", processMapper.selectOwners().getOrDefault(processId, List.of()));
         result.put("canEdit", op.canEdit(processId));
-        // 以服务器时间为准：负责人只能在锁定时间前改今天（ownerEditableDate，已锁则为 null），管理员可以改今天及以前
+        // 以服务器时间为准，告诉前端负责人现在能改哪几天（规则见 SettingService.ownerCanEdit）；管理员不受限制
         result.put("today", LocalDate.now());
         result.put("canEditPast", op.isAdmin());
         result.put("historyLock", settingService.historyLockEnabled());
         result.put("ownerTodayEditable", settingService.ownerTodayEditable());
+        result.put("ownerYesterdayEditable", settingService.ownerYesterdayEditable());
         result.put("lockTime", settingService.lockInfo().get("lockTime"));
+        result.put("lockRule", settingService.lockRuleText());
+        result.put("lockDay", settingService.lockDayOffset());
         result.put("lockEnabled", settingService.lockEnabled());
         result.put("month", month.toString());
         result.put("daysInMonth", month.lengthOfMonth());
@@ -119,7 +122,7 @@ public class ReportService {
         }
 
         LocalDate today = LocalDate.now();
-        String lockTime = settingService.lockInfo().get("lockTime").toString();
+        String lockRule = settingService.lockRuleText();
         Set<LocalDate> changedDates = new TreeSet<>();
         int changed = 0;
         for (Requests.Cell c : cells) {
@@ -129,12 +132,12 @@ public class ReportService {
             if (c.date().isAfter(today)) {
                 throw new BizException("不能填写未来日期（" + c.date() + "）的数据");
             }
-            // 工序负责人：历史数据锁定开启时不能改以前的；锁定开关开启时到当天锁定时间就不能改当天的。
-            // 系统管理员 / 管理员不受限制（会记操作日志）。规则都在“系统设置”里配置。
+            // 工序负责人受“系统设置 → 数据锁定”的规则限制（历史数据锁定、当天 / 次日锁定时间）；
+            // 系统管理员 / 管理员不受限制（会记操作日志）。
             if (!op.isAdmin() && !settingService.ownerCanEdit(c.date())) {
-                throw new BizException(c.date().isBefore(today)
-                        ? c.date() + " 的数据已锁定，负责人只能填写当天的数据，需要更正请联系管理员"
-                        : "今天的数据已于 " + lockTime + " 锁定，需要修改请联系管理员");
+                throw new BizException(c.date().equals(today)
+                        ? "今天的数据已按“" + lockRule + "”锁定，需要修改请联系管理员"
+                        : c.date() + " 的数据已锁定，需要更正请联系管理员");
             }
             Metric metric;
             try {
@@ -200,9 +203,16 @@ public class ReportService {
         ProcessStep p = processService.requireProcess(processId);
         checkCanEdit(op, p);
         ProcessBoard old = boardMapper.selectByProcess(processId);
-        ProcessBoard next = new ProcessBoard(processId, trim(req.groupName()), trim(req.groupPhoto()),
-                trim(req.action1()), trim(req.action2()), trim(req.action3()), trim(req.memberPhoto()),
-                trim(req.signers()), req.signDate(), op.username(), null);
+        List<ProcessBoard.Member> members = new ArrayList<>();
+        if (req.members() != null) {
+            if (req.members().size() > 4) {
+                throw new BizException("四功能小组最多 4 个人");
+            }
+            for (Requests.BoardMember m : req.members()) {
+                members.add(new ProcessBoard.Member(trim(m.photo()), trim(m.name()), trim(m.role())));
+            }
+        }
+        ProcessBoard next = new ProcessBoard(processId, members, trim(req.signers()), req.signDate(), op.username(), null);
         boardMapper.upsert(next);
         auditService.log(op, AuditService.MODULE_BOARD, old == null ? "新增" : "修改", p.name(), "班组看板",
                 old == null ? null : describe(old), describe(next));
@@ -275,12 +285,13 @@ public class ReportService {
 
     private static Map<String, Object> describe(ProcessBoard b) {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("小组名字", nvl(b.groupName()));
-        m.put("小组照片", nvl(b.groupPhoto()));
-        m.put("动作一", nvl(b.action1()));
-        m.put("动作二", nvl(b.action2()));
-        m.put("动作三", nvl(b.action3()));
-        m.put("组员签名照片", nvl(b.memberPhoto()));
+        List<ProcessBoard.Member> members = b.members() == null ? List.of() : b.members();
+        for (int i = 0; i < 4; i++) {
+            ProcessBoard.Member p = i < members.size() ? members.get(i) : null;
+            String who = p == null ? "" : (nvl(p.name()) + (p.role() == null ? "" : " · " + p.role())).trim();
+            String photo = p == null || p.photo() == null ? "" : "（照片 " + p.photo() + "）";
+            m.put("成员" + (i + 1), who + photo);
+        }
         m.put("全员签名", nvl(b.signers()));
         m.put("签名日期", b.signDate() == null ? "" : b.signDate().toString());
         return m;

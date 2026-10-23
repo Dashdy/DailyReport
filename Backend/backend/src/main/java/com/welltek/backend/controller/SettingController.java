@@ -45,7 +45,7 @@ public class SettingController {
     @PutMapping("/lock")
     public ApiResult saveLock(@RequestAttribute(AuthInterceptor.CURRENT_USER_ATTR) LoginUser op,
                               @RequestBody Requests.SaveLockTime req) {
-        settingService.saveLockTime(op, req.lockTime());
+        settingService.saveLockTime(op, req.lockTime(), req.lockDay());
         return ApiResult.ok("锁定时间已保存", settingService.lockInfo());
     }
 

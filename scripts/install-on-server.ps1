@@ -13,7 +13,7 @@
 #   4/8 用服务器本机 Windows 信任连接（sqlcmd -E）创建 DailyReport 数据库（已存在就跳过）
 #   5/8 用跟 Dashboard（WellTek-Backend）同一个 nssm.exe 和 java.exe 注册 DailyReport-Backend 服务，开机自启
 #   6/8 防火墙放行 8085 端口
-#   7/8 把 Nginx 配置放进 conf\conf.d\ 并 reload（Dashboard 的 80 端口不受影响）
+#   7/8 把 Nginx 配置放进 conf\conf.d\，重启 Nginx 服务并确认 8085 在监听（Dashboard 会中断一两秒）
 #   8/8 正式配置里的数据库密码还没改 → 不启动服务，提示去改；已经改好 → 启动服务并检查能不能访问
 
 $serverIp = "10.10.99.5"
@@ -130,8 +130,8 @@ Invoke-Command -Session $session -ArgumentList $webPort -ScriptBlock {
 
 Write-Host "7/8 配置 Nginx（$webPort 端口）..." -ForegroundColor Cyan
 Copy-Item -ToSession $session -Path "$repoRoot\deploy\nginx\dailyreport.conf" -Destination "$remoteRoot\Storage\dailyreport.conf" -Force
-$nginxOk = Invoke-Command -Session $session -ArgumentList "$remoteRoot\Storage\dailyreport.conf" -ScriptBlock {
-    param($conf)
+$nginxOk = Invoke-Command -Session $session -ArgumentList "$remoteRoot\Storage\dailyreport.conf", $webPort -ScriptBlock {
+    param($conf, $port)
     $proc = Get-Process nginx -ErrorAction SilentlyContinue | Where-Object { $_.Path } | Select-Object -First 1
     if (-not $proc) { Write-Host "    服务器上没找到正在运行的 nginx 进程" -ForegroundColor Red; return $false }
     $dir = Split-Path $proc.Path
@@ -145,18 +145,40 @@ $nginxOk = Invoke-Command -Session $session -ArgumentList "$remoteRoot\Storage\d
     Push-Location $dir
     $test = & .\nginx.exe -t 2>&1
     $testOk = $LASTEXITCODE -eq 0
-    if ($testOk) { & .\nginx.exe -s reload 2>&1 | Out-Null }
     Pop-Location
     if (-not $testOk) {
         Remove-Item "$dir\conf\conf.d\dailyreport.conf" -Force   # 配置有错就撤掉，别影响 Dashboard
         Write-Host ($test | Out-String) -ForegroundColor Red
         return $false
     }
-    Write-Host "    已放入 $dir\conf\conf.d\dailyreport.conf 并 reload"
-    return $true
+
+    # 让新配置生效。服务器上的 Nginx 是 NSSM 托管的 Windows 服务（WellTek-Nginx，以系统账号运行），
+    # 从这里 nginx -s reload 会报 OpenEvent ... Access is denied、实际没生效（2026-10-23 踩过），
+    # 所以优先重启那个服务（Dashboard 会中断一两秒）；找不到服务才退回 nginx -s reload。
+    $nginxSvc = Get-CimInstance Win32_Service | Where-Object { $_.Name -like "*nginx*" -or $_.PathName -like "*nginx*" } | Select-Object -First 1
+    if ($nginxSvc) {
+        Restart-Service -Name $nginxSvc.Name -Force
+        Write-Host "    已重启 Nginx 服务 $($nginxSvc.Name)"
+    } else {
+        Push-Location $dir
+        & .\nginx.exe -s reload 2>&1 | ForEach-Object { Write-Host "    $_" }
+        Pop-Location
+    }
+
+    # 确认 8085 真的开始监听了，别只看命令有没有报错
+    for ($i = 0; $i -lt 10; $i++) {
+        Start-Sleep -Seconds 1
+        if (Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue) {
+            Write-Host "    Nginx 已在 $port 端口监听"
+            return $true
+        }
+    }
+    Write-Host "    Nginx 配置已放入 conf.d，但 $port 端口没有开始监听" -ForegroundColor Red
+    return $false
 }
 if (-not $nginxOk) {
-    Write-Host "    Nginx 没有自动配好：请到服务器上把 F:\DailyReport\Storage\dailyreport.conf 放进 Nginx 的 conf\conf.d\，再 nginx -s reload" -ForegroundColor Yellow
+    Write-Host "    Nginx 没有自动配好：确认 F:\DailyReport\Storage\dailyreport.conf 已放进 Nginx 的 conf\conf.d\，" -ForegroundColor Yellow
+    Write-Host "    然后在服务器上重启 Nginx 服务（Restart-Service WellTek-Nginx）" -ForegroundColor Yellow
 }
 
 Write-Host "8/8 启动后端..." -ForegroundColor Cyan

@@ -1,5 +1,8 @@
 package com.welltek.backend.mapper;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.welltek.backend.entity.ProcessBoard;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -8,23 +11,25 @@ import org.springframework.stereotype.Repository;
 import java.sql.Date;
 import java.util.List;
 
-// 【班组看板】dbo.PROCESS_BOARD，每道工序一行
+// 【班组看板】dbo.PROCESS_BOARD，每道工序一行；四个人存成 JSON 放在 MEMBERS 列
 @Repository
 public class BoardMapper {
+
+    private static final TypeReference<List<ProcessBoard.Member>> MEMBERS_TYPE = new TypeReference<>() {
+    };
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private ObjectMapper objectMapper;
+
     public ProcessBoard selectByProcess(Integer processId) {
-        List<ProcessBoard> list = jdbcTemplate.query("SELECT * FROM dbo.PROCESS_BOARD WHERE PROCESS_ID = ?",
+        List<ProcessBoard> list = jdbcTemplate.query(
+                "SELECT PROCESS_ID, MEMBERS, SIGNERS, SIGN_DATE, UPDATED_BY, UPDATED_AT FROM dbo.PROCESS_BOARD WHERE PROCESS_ID = ?",
                 (rs, i) -> new ProcessBoard(
                         rs.getInt("PROCESS_ID"),
-                        rs.getString("GROUP_NAME"),
-                        rs.getString("GROUP_PHOTO"),
-                        rs.getString("ACTION1"),
-                        rs.getString("ACTION2"),
-                        rs.getString("ACTION3"),
-                        rs.getString("MEMBER_PHOTO"),
+                        parseMembers(rs.getString("MEMBERS")),
                         rs.getString("SIGNERS"),
                         RowUtils.date(rs, "SIGN_DATE"),
                         rs.getString("UPDATED_BY"),
@@ -36,15 +41,33 @@ public class BoardMapper {
     /** 有就更新，没有就新建 */
     public void upsert(ProcessBoard b) {
         Date signDate = b.signDate() == null ? null : Date.valueOf(b.signDate());
-        int updated = jdbcTemplate.update("UPDATE dbo.PROCESS_BOARD SET GROUP_NAME = ?, GROUP_PHOTO = ?, ACTION1 = ?, ACTION2 = ?, ACTION3 = ?, " +
-                        "MEMBER_PHOTO = ?, SIGNERS = ?, SIGN_DATE = ?, UPDATED_BY = ?, UPDATED_AT = SYSDATETIME() WHERE PROCESS_ID = ?",
-                b.groupName(), b.groupPhoto(), b.action1(), b.action2(), b.action3(),
-                b.memberPhoto(), b.signers(), signDate, b.updatedBy(), b.processId());
+        String members = toJson(b.members());
+        int updated = jdbcTemplate.update("UPDATE dbo.PROCESS_BOARD SET MEMBERS = ?, SIGNERS = ?, SIGN_DATE = ?, " +
+                        "UPDATED_BY = ?, UPDATED_AT = SYSDATETIME() WHERE PROCESS_ID = ?",
+                members, b.signers(), signDate, b.updatedBy(), b.processId());
         if (updated == 0) {
-            jdbcTemplate.update("INSERT INTO dbo.PROCESS_BOARD (PROCESS_ID, GROUP_NAME, GROUP_PHOTO, ACTION1, ACTION2, ACTION3, " +
-                            "MEMBER_PHOTO, SIGNERS, SIGN_DATE, UPDATED_BY, UPDATED_AT) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, SYSDATETIME())",
-                    b.processId(), b.groupName(), b.groupPhoto(), b.action1(), b.action2(), b.action3(),
-                    b.memberPhoto(), b.signers(), signDate, b.updatedBy());
+            jdbcTemplate.update("INSERT INTO dbo.PROCESS_BOARD (PROCESS_ID, MEMBERS, SIGNERS, SIGN_DATE, UPDATED_BY, UPDATED_AT) " +
+                            "VALUES (?, ?, ?, ?, ?, SYSDATETIME())",
+                    b.processId(), members, b.signers(), signDate, b.updatedBy());
+        }
+    }
+
+    private List<ProcessBoard.Member> parseMembers(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(json, MEMBERS_TYPE);
+        } catch (JsonProcessingException e) {
+            return List.of();
+        }
+    }
+
+    private String toJson(List<ProcessBoard.Member> members) {
+        try {
+            return objectMapper.writeValueAsString(members == null ? List.of() : members);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException(e);
         }
     }
 }

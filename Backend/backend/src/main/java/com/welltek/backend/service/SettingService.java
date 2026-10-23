@@ -27,12 +27,14 @@ public class SettingService {
 
     public static final String KEY_UPLOAD_DIR = "UPLOAD_DIR";
     public static final String KEY_UPLOAD_DIR_HISTORY = "UPLOAD_DIR_HISTORY";
-    /** 数据锁定时间（HH:mm）：当天的数据到当天这个时间点锁定，之后只有系统管理员 / 管理员能改 */
+    /** 数据锁定时间（HH:mm）：配合 LOCK_DAY，某天的数据到“当天 / 次日 + 这个时间”锁定，之后只有系统管理员 / 管理员能改 */
     public static final String KEY_LOCK_TIME = "LOCK_TIME";
     /** 锁定开关（true / false）：关闭时不按时间锁，负责人当天全天都能填；默认关闭 */
     public static final String KEY_LOCK_ENABLED = "LOCK_ENABLED";
     /** 历史数据锁定开关（true / false）：开启时前一天及以前的数据负责人不能改；默认开启 */
     public static final String KEY_HISTORY_LOCK = "HISTORY_LOCK";
+    /** 锁定时间是“当天”（0）还是“次日”（1）：次日 08:00 表示 23 号的数据到 24 号 08:00 才锁定；默认当天 */
+    public static final String KEY_LOCK_DAY = "LOCK_DAY";
     private static final LocalTime DEFAULT_LOCK_TIME = LocalTime.of(23, 59);
     private static final DateTimeFormatter HH_MM = DateTimeFormatter.ofPattern("HH:mm");
 
@@ -136,21 +138,46 @@ public class SettingService {
         }
     }
 
-    /**
-     * 工序负责人现在还能不能填 / 改今天的数据。
-     * 锁定开关关闭 → 全天都能；开启 → 到当天锁定时间为止。例：锁定时间 20:00，19:30 能改，20:00 起不能。
-     */
-    public boolean ownerTodayEditable() {
-        return !lockEnabled() || LocalTime.now().isBefore(lockTime());
+    /** 锁定时间是当天（0）还是次日（1） */
+    public int lockDayOffset() {
+        return "1".equals(settingMapper.selectValue(KEY_LOCK_DAY)) ? 1 : 0;
     }
 
-    /** 工序负责人能不能改某一天的数据（未来日期另由调用方拦截） */
+    /**
+     * 工序负责人能不能改某一天的数据（未来日期另由调用方拦截）：
+     * - 历史数据锁定关闭：以前的数据都能改；
+     * - 当天锁定时间开关关闭：只有今天能改（全天）；
+     * - 当天锁定时间开关开启：某天的数据在“当天 / 次日 + 锁定时间”之前能改。
+     *   例：当天 20:00 → 23 号的数据 23 号 20:00 锁；次日 08:00 → 23 号的数据 24 号 08:00 才锁，
+     *   所以 24 号早上 08:00 前负责人还能补 23 号的（即使历史数据锁定开着）。
+     */
     public boolean ownerCanEdit(LocalDate date) {
         LocalDate today = LocalDate.now();
-        if (date.isBefore(today)) {
-            return !historyLockEnabled();
+        if (date.isAfter(today)) {
+            return false;
         }
-        return date.equals(today) && ownerTodayEditable();
+        if (date.isBefore(today) && !historyLockEnabled()) {
+            return true;
+        }
+        if (!lockEnabled()) {
+            return date.equals(today);
+        }
+        return LocalDateTime.now().isBefore(date.plusDays(lockDayOffset()).atTime(lockTime()));
+    }
+
+    /** 工序负责人现在还能不能改今天的数据 */
+    public boolean ownerTodayEditable() {
+        return ownerCanEdit(LocalDate.now());
+    }
+
+    /** 工序负责人现在还能不能改昨天的数据（次日锁定时有用） */
+    public boolean ownerYesterdayEditable() {
+        return ownerCanEdit(LocalDate.now().minusDays(1));
+    }
+
+    /** 给人看的锁定规则，如“当天 20:00”“次日 08:00” */
+    public String lockRuleText() {
+        return (lockDayOffset() == 1 ? "次日 " : "当天 ") + lockTime().format(HH_MM);
     }
 
     public boolean lockEnabled() {
@@ -182,7 +209,7 @@ public class SettingService {
         }
         settingMapper.upsert(KEY_LOCK_ENABLED, String.valueOf(enabled), op.username());
         auditService.log(op, "系统设置", enabled ? "开启" : "关闭", null, "数据锁定开关",
-                old ? "开启" : "关闭", (enabled ? "开启（每天 " : "关闭（原定 ") + lockTime().format(HH_MM) + (enabled ? " 锁定当天数据）" : " 锁定，现在当天全天可填）"));
+                old ? "开启" : "关闭", enabled ? "开启（每天的数据在" + lockRuleText() + " 锁定）" : "关闭（当天全天可填）");
     }
 
     public Map<String, Object> lockInfo() {
@@ -197,28 +224,33 @@ public class SettingService {
         m.put("enabledUpdatedBy", enabledSetting == null ? null : enabledSetting.get("updatedBy"));
         m.put("enabledUpdatedAt", enabledSetting == null ? null : enabledSetting.get("updatedAt"));
         m.put("lockTime", lockTime().format(HH_MM));
+        m.put("lockDay", lockDayOffset());
+        m.put("lockRule", lockRuleText());
         m.put("isDefault", setting == null || setting.get("value") == null);
         m.put("ownerTodayEditable", ownerTodayEditable());
+        m.put("ownerYesterdayEditable", ownerYesterdayEditable());
         m.put("updatedBy", setting == null ? null : setting.get("updatedBy"));
         m.put("updatedAt", setting == null ? null : setting.get("updatedAt"));
         return m;
     }
 
-    /** 只有系统管理员能改（Controller 上有 @RequireSysAdmin） */
-    public void saveLockTime(LoginUser op, String input) {
+    /** 锁定时间 + 当天 / 次日，只有系统管理员能改（Controller 上有 @RequireSysAdmin）；lockDay 为空表示不改 */
+    public void saveLockTime(LoginUser op, String input, Integer lockDay) {
         LocalTime t;
         try {
             t = LocalTime.parse(input == null ? "" : input.trim(), HH_MM);
         } catch (DateTimeParseException e) {
             throw new BizException("锁定时间格式不对，请填写 HH:mm，例如 08:00");
         }
-        String old = lockTime().format(HH_MM);
-        String next = t.format(HH_MM);
+        int day = lockDay == null ? lockDayOffset() : (lockDay == 1 ? 1 : 0);
+        String old = lockRuleText();
+        String next = (day == 1 ? "次日 " : "当天 ") + t.format(HH_MM);
         if (old.equals(next)) {
             throw new BizException("锁定时间没有变化");
         }
-        settingMapper.upsert(KEY_LOCK_TIME, next, op.username());
-        auditService.log(op, "系统设置", "修改", null, "数据锁定时间", "当天 " + old + " 锁定", "当天 " + next + " 锁定");
+        settingMapper.upsert(KEY_LOCK_TIME, t.format(HH_MM), op.username());
+        settingMapper.upsert(KEY_LOCK_DAY, String.valueOf(day), op.username());
+        auditService.log(op, "系统设置", "修改", null, "数据锁定时间", old + " 锁定", next + " 锁定");
     }
 
     // ---------------- 内部方法 ----------------

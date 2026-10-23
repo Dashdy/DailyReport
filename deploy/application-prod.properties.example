@@ -13,5 +13,8 @@ spring.datasource.username=sa
 # 【必须改】换成服务器上数据库的真实密码
 spring.datasource.password=请改成正式数据库密码
 
+# ---- 后端只在本机监听，外面只能通过 Nginx（8085）访问，不能直接连 8083 ----
+server.address=127.0.0.1
+
 # ---- 图片默认存储路径（之后也可以由系统管理员在“系统设置”页面修改）----
 app.upload-dir=F:/DailyReport/Storage/uploads
