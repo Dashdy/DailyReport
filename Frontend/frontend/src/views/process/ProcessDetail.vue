@@ -5,10 +5,11 @@
         <div class="crumb">
           <router-link to="/processes" class="crumb-link">工序战报</router-link> / {{ processName }}
         </div>
-        <h1>{{ processName }}工序 · 每日战报</h1>
+        <h1>{{ fullName }} · 每日战报</h1>
         <div class="owner-line">
           负责人：{{ owners || '未分配' }}
           <el-tag v-if="d && d.canEdit" type="success" size="small" effect="dark">可编辑</el-tag>
+          <el-tag v-else-if="d && !d.process.active" type="danger" size="small" effect="dark">已停用（只读）</el-tag>
           <el-tag v-else-if="d" type="info" size="small" effect="dark">只读：你不是该工序负责人</el-tag>
         </div>
       </div>
@@ -27,7 +28,7 @@
           <thead>
             <tr>
               <th colspan="4" class="cert-title">
-                {{ processName }}工序 六项自主保证书
+                {{ fullName }} 六项自主保证书
                 <el-button v-if="d.canEdit" size="small" class="title-btn" @click="openTargets">编辑目标</el-button>
               </th>
             </tr>
@@ -118,10 +119,11 @@
           <table class="trend">
             <thead>
               <tr>
-                <th class="month-cell">{{ monthNum }}月</th>
+                <th class="month-cell" colspan="2">{{ monthNum }}月</th>
                 <th :colspan="days.length" class="trend-title"><span>每日走势表</span></th>
               </tr>
               <tr>
+                <th class="goal-head">班组目标</th>
                 <th class="row-head">日期</th>
                 <th v-for="day in days" :key="day" class="day-head"
                     :class="{ selected: day === selectedDay, future: isFuture(day), locked: d.canEdit && isLocked(day) }"
@@ -133,6 +135,11 @@
             </thead>
             <tbody>
               <tr v-for="m in d.metrics" :key="m.key">
+                <!-- 班组目标（参考，放最左边）：填数时直接对照，红绿就是按下面这行小字的规则判定的 -->
+                <td class="goal-cell">
+                  <div class="goal-text">{{ (targetMap[m.key] && targetMap[m.key].teamTarget) || '—' }}</div>
+                  <div class="goal-rule">{{ ruleText(targetMap[m.key]) }}</div>
+                </td>
                 <th class="row-head">{{ m.label }}</th>
                 <td v-for="day in days" :key="day"
                     :class="['cell', 'st-' + statusOf(day, m.key), { dirty: isDirty(day, m.key), selected: day === selectedDay, locked: d.canEdit && isLocked(day) }]"
@@ -270,6 +277,8 @@ const d = ref(null)
 const loading = ref(false)
 
 const processName = computed(() => (d.value ? d.value.process.name : ''))
+// 标题用：名字本身以“工序”结尾就不再加“工序”（避免“新工序测试工序”这种重复）
+const fullName = computed(() => (processName.value.endsWith('工序') ? processName.value : processName.value + '工序'))
 const owners = computed(() => (d.value ? d.value.owners.map(o => o.username).join('、') : ''))
 const monthNum = computed(() => Number(month.value.slice(5)))
 const days = computed(() => (d.value ? Array.from({ length: d.value.daysInMonth }, (_, i) => i + 1) : []))
@@ -342,6 +351,12 @@ const dirtyKeys = computed(() => Object.keys(grid).filter(k => (grid[k] || '').t
 const dirtyCount = computed(() => dirtyKeys.value.length)
 
 const targetMap = computed(() => Object.fromEntries((d.value ? d.value.targets : []).map(t => [t.metric, t])))
+
+/** 系统判定红绿用的规则，如“达标 ≤ 2.6%” */
+function ruleText(t) {
+  if (!t || t.targetValue === null || t.targetValue === undefined) return '未设判定值'
+  return `达标 ${t.compareOp === 'GE' ? '≥' : '≤'} ${fmtNum(t.targetValue)}${t.unit || ''}`
+}
 
 /** 跟后端同一套判定：LE 当前值 ≤ 目标为达标，GE 当前值 ≥ 目标为达标 */
 function statusOf(day, metric) {
@@ -887,6 +902,10 @@ function shortVal(v) {
 
 .month-cell {
   font-size: 15px;
+  /* 跟下面的“班组目标 + 指标”两列一起固定在左边，横向拖动时不会滚走 */
+  position: sticky;
+  left: 0;
+  z-index: 2;
 }
 
 .trend-title {
@@ -898,15 +917,52 @@ function shortVal(v) {
 /* 31 列很宽，标题贴着可视区域左侧，横向滚动时也一直看得到 */
 .trend-title span {
   position: sticky;
-  left: 72px;
+  left: 176px;
   padding-left: 16px;
 }
 
 .row-head {
   position: sticky;
+  left: 104px; /* 让出最左边的班组目标列 */
+  z-index: 1;
+  width: 52px;
+  min-width: 52px;
+  max-width: 52px;
+}
+
+/* 班组目标列：固定在最左边（参考用），横向拖动表格时一直看得到 */
+.goal-head,
+.goal-cell {
+  position: sticky;
   left: 0;
   z-index: 1;
-  min-width: 52px;
+  width: 104px;
+  min-width: 104px;
+  max-width: 104px;
+}
+
+.goal-cell {
+  padding: 2px 4px;
+  text-align: center;
+  background: #fff7e0;
+  border: 1px solid #b9d7bc;
+  box-shadow: inset -2px 0 0 #e6c26a;
+  line-height: 1.3;
+}
+
+.goal-text {
+  font-size: 13px;
+  font-weight: 700;
+  color: #7a5200;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.goal-rule {
+  font-size: 11px;
+  color: #b07d10;
+  white-space: nowrap;
 }
 
 .day-head {

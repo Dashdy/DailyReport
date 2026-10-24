@@ -92,7 +92,8 @@ public class ReportService {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("process", Map.of("id", p.id(), "name", p.name(), "active", p.active()));
         result.put("owners", processMapper.selectOwners().getOrDefault(processId, List.of()));
-        result.put("canEdit", op.canEdit(processId));
+        // 停用的工序只读：历史数据照样能看，谁都不能再改（要改先在“工序配置”里重新启用）
+        result.put("canEdit", p.active() && op.canEdit(processId));
         // 以服务器时间为准，告诉前端负责人现在能改哪几天（规则见 SettingService.ownerCanEdit）；管理员不受限制
         result.put("today", LocalDate.now());
         result.put("canEditPast", op.isAdmin());
@@ -226,6 +227,9 @@ public class ReportService {
     // ---------------- 内部方法 ----------------
 
     private void checkCanEdit(LoginUser op, ProcessStep p) {
+        if (!p.active()) {
+            throw new BizException("“" + p.name() + "”已停用，数据只能查看不能修改；需要修改请先在“工序配置”里重新启用");
+        }
         if (!op.canEdit(p.id())) {
             throw new BizException("你不是“" + p.name() + "”的负责人，不能编辑该工序的数据");
         }
