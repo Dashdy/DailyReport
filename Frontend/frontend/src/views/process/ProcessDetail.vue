@@ -336,7 +336,7 @@ import api from '@/api'
 import EChart from '@/components/EChart.vue'
 import ImageUpload from '@/components/ImageUpload.vue'
 import { fmtNum, fmtTime, todayStr, STATUS_TEXT } from '@/utils/format'
-import { combine, escapeHtml, groupByUnit, judge, metricRuleText, ruleText, SERIES_COLORS } from '@/utils/metric'
+import { axisRange, combine, escapeHtml, groupByUnit, judge, metricRuleText, ruleText, SERIES_COLORS } from '@/utils/metric'
 
 /** “整项”那一行的标记 */
 const SUM_MARK = { PASS: '✓', FAIL: '✗', EMPTY: '', NO_TARGET: '', INVALID: '?' }
@@ -746,6 +746,7 @@ function chartOption(t) {
     // 安全（事故起数）、品质（流出片数）是计数，刻度只取整数
     yAxis.push({
       type: 'value', gridIndex: gi, scale: true,
+      ...axisRange(g.items), // 范围包含目标值，目标线不会跑到图外面
       name: groups.length > 1 ? g.unit : '', nameTextStyle: { color: '#8a96a3', align: 'left' },
       minInterval: ['SAFETY', 'QUALITY'].includes(t.metric) ? 1 : undefined,
       splitLine: { lineStyle: { color: '#eef0f3' } }

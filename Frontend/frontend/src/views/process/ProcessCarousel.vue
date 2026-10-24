@@ -186,7 +186,7 @@ import EChart from '@/components/EChart.vue'
 import { useFullscreen } from '@/composables/useFullscreen'
 import { useDailyReload } from '@/composables/useDailyReload'
 import { fileUrl, fmtNum, fmtRate, todayStr } from '@/utils/format'
-import { combine, escapeHtml, groupByUnit, judge, metricRuleText, ruleText, SERIES_COLORS_DARK } from '@/utils/metric'
+import { axisRange, combine, escapeHtml, groupByUnit, judge, metricRuleText, ruleText, SERIES_COLORS_DARK } from '@/utils/metric'
 
 /** “整项”那一行的标记 */
 const SUM_MARK = { PASS: '✓', FAIL: '✗', EMPTY: '', NO_TARGET: '' }
@@ -353,6 +353,7 @@ const chartOption = computed(() => {
     })
     yAxis.push({
       type: 'value', gridIndex: gi, scale: true,
+      ...axisRange(g.items), // 范围包含目标值，目标线不会跑到图外面
       name: n > 1 ? g.unit : '', nameTextStyle: { color: '#8fb4d9', fontSize: 13, align: 'left' },
       minInterval: ['SAFETY', 'QUALITY'].includes(s.metric) ? 1 : undefined,
       axisLabel: axisText,

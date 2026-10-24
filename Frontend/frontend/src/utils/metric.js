@@ -37,6 +37,36 @@ export function metricRuleText(t) {
 export const SERIES_COLORS = ['#0070c0', '#13a8a8', '#8e5bd6', '#d4880f', '#c2387a', '#4b8f29']
 export const SERIES_COLORS_DARK = ['#3ea6ff', '#3fe0d0', '#b38bff', '#ffb020', '#ff7ab8', '#8fe36a']
 
+/**
+ * 纵轴范围：把目标值也算进去，目标线才一定画得出来。
+ * （纵轴按实际数据缩放时，目标离数据太远就会落到图外面，比如实际 0.029、目标 0.22。）
+ * 返回 ECharts yAxis 的 { min, max }，上下各留 10% 空白；数据和目标都不小于 0 时下限不低于 0。
+ */
+export function axisRange(items) {
+  const targets = items.map(it => it.targetValue).filter(v => v !== null && v !== undefined)
+  const extent = v => {
+    const lo = Math.min(...targets, Number.isFinite(v.min) ? v.min : Infinity)
+    const hi = Math.max(...targets, Number.isFinite(v.max) ? v.max : -Infinity)
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null
+    const pad = hi === lo ? Math.abs(hi) * 0.1 || 1 : (hi - lo) * 0.1
+    // 上下限取整到“好看”的数（如 0.25 而不是 0.2442），刻度才不会出现零碎小数
+    const step = Math.pow(10, Math.floor(Math.log10(hi - lo + 2 * pad))) / 2
+    const round = x => Number(x.toPrecision(12))
+    return { lo: round(Math.floor((lo - pad) / step) * step), hi: round(Math.ceil((hi + pad) / step) * step), nonNegative: lo >= 0 }
+  }
+  return {
+    min: v => {
+      const e = extent(v)
+      if (!e) return v.min
+      return e.nonNegative ? Math.max(0, e.lo) : e.lo
+    },
+    max: v => {
+      const e = extent(v)
+      return e ? e.hi : v.max
+    }
+  }
+}
+
 /** 图表提示框是按 HTML 显示的，子项名称、单位是用户填的，先转义 */
 export function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
