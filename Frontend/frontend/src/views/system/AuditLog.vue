@@ -54,7 +54,7 @@ import { Search } from '@element-plus/icons-vue'
 import api from '@/api'
 import { fmtTime } from '@/utils/format'
 
-const MODULES = ['每日数据', '目标设定', '班组看板', '工序分配', '工序配置', '用户管理', '系统设置', '登录']
+const MODULES = ['每日数据', '目标设定', '班组看板', '行动与亮点', '企业微信推送', '工序分配', '工序配置', '用户管理', '系统设置', '登录']
 const MODULE_TYPE = { 每日数据: 'primary', 目标设定: 'warning', 班组看板: 'success', 用户管理: 'danger', 系统设置: 'danger' }
 
 const q = reactive({ page: 1, size: 20, module: '', processName: '', keyword: '' })

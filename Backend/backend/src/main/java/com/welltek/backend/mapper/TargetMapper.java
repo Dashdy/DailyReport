@@ -9,23 +9,20 @@ import org.springframework.stereotype.Repository;
 
 import java.util.*;
 
-// 【六项自主保证书】dbo.METRIC_TARGET
+// 【六项自主保证书：公司底线 / 班组自定】dbo.METRIC_TARGET（判定规则在子项 dbo.METRIC_ITEM 里）
 @Repository
 public class TargetMapper {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
-    private static final String COLUMNS = "PROCESS_ID, METRIC, BASELINE, TEAM_TARGET, UNIT, COMPARE_OP, TARGET_VALUE, UPDATED_BY, UPDATED_AT";
+    private static final String COLUMNS = "PROCESS_ID, METRIC, BASELINE, TEAM_TARGET, UPDATED_BY, UPDATED_AT";
 
     private static final RowMapper<MetricTarget> ROW_MAPPER = (rs, i) -> new MetricTarget(
             rs.getInt("PROCESS_ID"),
             Metric.valueOf(rs.getString("METRIC")),
             rs.getString("BASELINE"),
             rs.getString("TEAM_TARGET"),
-            rs.getString("UNIT"),
-            rs.getString("COMPARE_OP"),
-            RowUtils.decimal(rs, "TARGET_VALUE"),
             rs.getString("UPDATED_BY"),
             RowUtils.dateTime(rs, "UPDATED_AT"));
 
@@ -46,14 +43,14 @@ public class TargetMapper {
     }
 
     public void insert(MetricTarget t) {
-        jdbcTemplate.update("INSERT INTO dbo.METRIC_TARGET (PROCESS_ID, METRIC, BASELINE, TEAM_TARGET, UNIT, COMPARE_OP, TARGET_VALUE, UPDATED_BY, UPDATED_AT) " +
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, SYSDATETIME())",
-                t.processId(), t.metric().name(), t.baseline(), t.teamTarget(), t.unit(), t.compareOp(), t.targetValue(), t.updatedBy());
+        jdbcTemplate.update("INSERT INTO dbo.METRIC_TARGET (PROCESS_ID, METRIC, BASELINE, TEAM_TARGET, UPDATED_BY, UPDATED_AT) " +
+                        "VALUES (?, ?, ?, ?, ?, SYSDATETIME())",
+                t.processId(), t.metric().name(), t.baseline(), t.teamTarget(), t.updatedBy());
     }
 
     public void update(MetricTarget t) {
-        jdbcTemplate.update("UPDATE dbo.METRIC_TARGET SET BASELINE = ?, TEAM_TARGET = ?, UNIT = ?, COMPARE_OP = ?, TARGET_VALUE = ?, " +
-                        "UPDATED_BY = ?, UPDATED_AT = SYSDATETIME() WHERE PROCESS_ID = ? AND METRIC = ?",
-                t.baseline(), t.teamTarget(), t.unit(), t.compareOp(), t.targetValue(), t.updatedBy(), t.processId(), t.metric().name());
+        jdbcTemplate.update("UPDATE dbo.METRIC_TARGET SET BASELINE = ?, TEAM_TARGET = ?, UPDATED_BY = ?, UPDATED_AT = SYSDATETIME() " +
+                        "WHERE PROCESS_ID = ? AND METRIC = ?",
+                t.baseline(), t.teamTarget(), t.updatedBy(), t.processId(), t.metric().name());
     }
 }

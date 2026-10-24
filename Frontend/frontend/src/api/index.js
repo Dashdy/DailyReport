@@ -21,6 +21,9 @@ export default {
   processAll: () => get('/api/processes/all'),
   createProcess: body => post('/api/processes', body),
   updateProcess: (id, body) => put(`/api/processes/${id}`, body),
+  deleteProcess: id => del(`/api/processes/${id}`),
+  deletedProcesses: () => get('/api/processes/deleted'),
+  restoreProcess: id => post(`/api/processes/${id}/restore`),
   setOwners: (id, ids) => put(`/api/processes/${id}/owners`, { ids }),
 
   // 工序详情
@@ -28,8 +31,11 @@ export default {
   saveRecords: (id, cells) => put(`/api/processes/${id}/records`, { cells }),
   saveTargets: (id, targets) => put(`/api/processes/${id}/targets`, { targets }),
   saveBoard: (id, body) => put(`/api/processes/${id}/board`, body),
+  saveNote: (id, body) => put(`/api/processes/${id}/notes`, body),
   snapshots: (id, date) => get(`/api/processes/${id}/snapshots`, { date }),
   processLogs: (id, params) => get(`/api/processes/${id}/logs`, params),
+  pushPreview: (id, date) => get(`/api/processes/${id}/push/preview`, { date }),
+  pushProcess: (id, date) => request.post(`/api/processes/${id}/push`, null, { params: { date }, timeout: 30000 }).then(r => r.data),
 
   // 用户
   users: () => get('/api/users'),
@@ -46,6 +52,10 @@ export default {
   saveLockSetting: (lockTime, lockDay) => put('/api/settings/lock', { lockTime, lockDay }),
   saveLockEnabled: enabled => put('/api/settings/lock/enabled', { enabled }),
   saveHistoryLock: enabled => put('/api/settings/lock/history', { enabled }),
+  pushSettings: () => get('/api/settings/push'),
+  savePushSettings: body => put('/api/settings/push', body),
+  pushTest: () => post('/api/settings/push/test'),
+  pushRun: () => post('/api/settings/push/run'),
 
   // 操作日志（系统管理，仅系统管理员 / 管理员）
   auditLogs: params => get('/api/audit-logs', params),

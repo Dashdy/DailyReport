@@ -18,3 +18,10 @@ server.address=127.0.0.1
 
 # ---- 图片默认存储路径（之后也可以由系统管理员在“系统设置”页面修改）----
 app.upload-dir=F:/DailyReport/Storage/uploads
+
+# ---- 企业微信“ID助手”自建应用（推送给个人）----
+# 三个值找企业微信管理员要；留空就是不启用这个渠道。改完重启服务：Restart-Service DailyReport-Backend
+# 另外要请管理员在企业微信后台给“ID助手”配置“企业可信 IP”（服务器访问外网的公网 IP），否则会报 60020
+app.wecom.corp-id=
+app.wecom.agent-id=
+app.wecom.secret=

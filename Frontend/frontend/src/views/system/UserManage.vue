@@ -15,6 +15,12 @@
       <el-table v-loading="loading" :data="shown" border stripe>
         <el-table-column label="用户名" prop="username" min-width="110" />
         <el-table-column label="账号" prop="account" min-width="110" />
+        <el-table-column label="企业微信账号" min-width="120">
+          <template #default="{ row }">
+            <span v-if="row.wecomUserId">{{ row.wecomUserId }}</span>
+            <span v-else class="muted">未登记</span>
+          </template>
+        </el-table-column>
         <el-table-column label="角色" width="120">
           <template #default="{ row }">
             <el-tag :type="row.role === 'SYS_ADMIN' ? 'danger' : row.role === 'ADMIN' ? 'warning' : 'info'">{{ row.roleLabel }}</el-tag>
@@ -77,6 +83,10 @@
           <el-select v-model="form.processIds" multiple filterable placeholder="选择该用户负责（可编辑）的工序" style="width: 100%">
             <el-option v-for="p in processes" :key="p.id" :label="p.name + (p.active ? '' : '（已停用）')" :value="p.id" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="企业微信账号">
+          <el-input id="user-form-wecom" v-model="form.wecomUserId" maxlength="64"
+                    placeholder="企业微信通讯录里的“账号”，用于推送战报；不推送可不填" />
         </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="form.remark" maxlength="200" placeholder="如：开料班长" />
@@ -141,7 +151,7 @@ const canManage = row => row.role !== 'SYS_ADMIN' || isSysAdmin.value
 const formVisible = ref(false)
 const formRef = ref()
 const saving = ref(false)
-const form = reactive({ id: null, account: '', username: '', password: '', role: 'USER', enabled: true, processIds: [], remark: '' })
+const form = reactive({ id: null, account: '', username: '', password: '', role: 'USER', enabled: true, processIds: [], remark: '', wecomUserId: '' })
 const rules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
   account: [
@@ -160,7 +170,7 @@ const rules = {
 }
 
 function openCreate() {
-  Object.assign(form, { id: null, account: '', username: '', password: '', role: 'USER', enabled: true, processIds: [], remark: '' })
+  Object.assign(form, { id: null, account: '', username: '', password: '', role: 'USER', enabled: true, processIds: [], remark: '', wecomUserId: '' })
   formVisible.value = true
   formRef.value && formRef.value.clearValidate()
 }
@@ -168,7 +178,7 @@ function openCreate() {
 function openEdit(row) {
   Object.assign(form, {
     id: row.id, account: row.account, username: row.username, password: '', role: row.role, enabled: row.enabled,
-    processIds: [...row.processIds], remark: row.remark || ''
+    processIds: [...row.processIds], remark: row.remark || '', wecomUserId: row.wecomUserId || ''
   })
   formVisible.value = true
   formRef.value && formRef.value.clearValidate()

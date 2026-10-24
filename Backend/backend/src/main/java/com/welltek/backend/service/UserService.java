@@ -54,6 +54,7 @@ public class UserService {
             m.put("roleLabel", u.role().getLabel());
             m.put("enabled", u.enabled());
             m.put("remark", u.remark());
+            m.put("wecomUserId", u.wecomUserId());
             m.put("processIds", ids);
             m.put("processNames", ids.stream().map(processNames::get).filter(Objects::nonNull).toList());
             m.put("createdAt", u.createdAt());
@@ -78,6 +79,7 @@ public class UserService {
         boolean enabled = req.enabled() == null || req.enabled();
 
         Integer id = userMapper.insert(account, username, passwordEncoder.encode(password), role, enabled, trim(req.remark()));
+        userMapper.updateWecomUserId(id, trim(req.wecomUserId()));
         List<Integer> processIds = req.processIds() == null ? List.of() : req.processIds();
         userMapper.replaceProcesses(id, processIds);
 
@@ -113,6 +115,7 @@ public class UserService {
         List<Integer> processIds = req.processIds() == null ? oldProcessIds : req.processIds();
 
         userMapper.update(id, account, username, role, enabled, trim(req.remark()));
+        userMapper.updateWecomUserId(id, trim(req.wecomUserId()));
         userMapper.replaceProcesses(id, processIds);
         boolean passwordChanged = req.password() != null && !req.password().isBlank();
         if (passwordChanged) {
@@ -124,11 +127,13 @@ public class UserService {
         }
 
         Map<String, Object> after = describe(account, username, role, enabled, trim(req.remark()), processIds);
+        after.put("企业微信账号", nvl(trim(req.wecomUserId())));
         if (passwordChanged) {
             after.put("密码", "已重置");
         }
-        auditService.log(op, AuditService.MODULE_USER, "修改", null, "用户 " + old.username() + "（" + old.account() + "）",
-                describe(old.account(), old.username(), old.role(), old.enabled(), old.remark(), oldProcessIds), after);
+        Map<String, Object> before = describe(old.account(), old.username(), old.role(), old.enabled(), old.remark(), oldProcessIds);
+        before.put("企业微信账号", nvl(old.wecomUserId()));
+        auditService.log(op, AuditService.MODULE_USER, "修改", null, "用户 " + old.username() + "（" + old.account() + "）", before, after);
     }
 
     @Transactional
@@ -231,6 +236,10 @@ public class UserService {
             throw new BizException(message);
         }
         return s.trim();
+    }
+
+    private static String nvl(String s) {
+        return s == null ? "" : s;
     }
 
     private static String trim(String s) {

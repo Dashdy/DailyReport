@@ -23,6 +23,8 @@ public class AuditService {
     public static final String MODULE_RECORD = "每日数据";
     public static final String MODULE_TARGET = "目标设定";
     public static final String MODULE_BOARD = "班组看板";
+    public static final String MODULE_NOTE = "行动与亮点";
+    public static final String MODULE_PUSH = "企业微信推送";
 
     @Autowired
     private AuditMapper auditMapper;
@@ -44,9 +46,9 @@ public class AuditService {
         return auditMapper.selectPage(page, clampSize(size), null, module, processName, keyword, startDate, endDate);
     }
 
-    /** 工序详情页的修改记录（所有登录用户）：只有这道工序的填数、目标、看板记录，不含用户管理、负责人分配等系统管理信息 */
+    /** 工序详情页的修改记录（所有登录用户）：只有这道工序的填数、目标、看板、行动与亮点记录，不含用户管理、负责人分配等系统管理信息 */
     public Map<String, Object> processPage(String processName, int page, int size) {
-        return auditMapper.selectPage(page, clampSize(size), List.of(MODULE_RECORD, MODULE_TARGET, MODULE_BOARD),
+        return auditMapper.selectPage(page, clampSize(size), List.of(MODULE_RECORD, MODULE_TARGET, MODULE_BOARD, MODULE_NOTE),
                 null, processName, null, null, null);
     }
 

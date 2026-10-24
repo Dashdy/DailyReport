@@ -6,6 +6,7 @@ import com.welltek.backend.security.AuthInterceptor;
 import com.welltek.backend.security.LoginUser;
 import com.welltek.backend.security.RequireAdmin;
 import com.welltek.backend.security.RequireSysAdmin;
+import com.welltek.backend.service.PushService;
 import com.welltek.backend.service.SettingService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -13,13 +14,46 @@ import org.springframework.web.bind.annotation.*;
 // 【系统设置】系统管理员、管理员可以进来查看，普通用户不行。
 // - 图片存储路径：系统管理员、管理员都能改；
 // - 数据锁定时间：只有系统管理员能改，管理员只能看；
-// - 锁定开关、历史数据锁定开关：系统管理员、管理员都能拨，随时卡控。
+// - 锁定开关、历史数据锁定开关：系统管理员、管理员都能拨，随时卡控；
+// - 企业微信推送：系统管理员、管理员可以配置、发测试消息、立即执行一次自动推送。
 @RestController
 @RequestMapping("/api/settings")
 public class SettingController {
 
     @Autowired
     private SettingService settingService;
+
+    @Autowired
+    private PushService pushService;
+
+    // ---------------- 企业微信推送 ----------------
+
+    @RequireAdmin
+    @GetMapping("/push")
+    public ApiResult push() {
+        return ApiResult.ok("ok", pushService.settings());
+    }
+
+    @RequireAdmin
+    @PutMapping("/push")
+    public ApiResult savePush(@RequestAttribute(AuthInterceptor.CURRENT_USER_ATTR) LoginUser op,
+                              @RequestBody Requests.SavePush req) {
+        pushService.saveSettings(op, req);
+        return ApiResult.ok("推送设置已保存", pushService.settings());
+    }
+
+    @RequireAdmin
+    @PostMapping("/push/test")
+    public ApiResult pushTest(@RequestAttribute(AuthInterceptor.CURRENT_USER_ATTR) LoginUser op) {
+        return ApiResult.ok(pushService.sendTest(op), pushService.settings());
+    }
+
+    @RequireAdmin
+    @PostMapping("/push/run")
+    public ApiResult pushRun(@RequestAttribute(AuthInterceptor.CURRENT_USER_ATTR) LoginUser op) {
+        pushService.runAutoPushNow(op);
+        return ApiResult.ok("已开始推送今天的战报，工序多的话要一两分钟，稍后刷新看推送记录");
+    }
 
     @RequireAdmin
     @GetMapping("/storage")

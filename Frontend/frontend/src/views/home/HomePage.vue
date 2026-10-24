@@ -90,13 +90,19 @@
                 <td class="col-owner">{{ row.owners.join('、') || '未分配' }}</td>
                 <td v-for="m in data.metrics" :key="m.metric" :class="'cell-' + row.cells[m.metric].status"
                     :title="row.cells[m.metric].teamTarget ? '班组目标：' + row.cells[m.metric].teamTarget : ''">
-                  <template v-if="row.cells[m.metric].value !== null">
+                  <!-- 拆了子项的：每个子项一行各自红绿，格子底色是整项结果（所有子项都达标才是绿色） -->
+                  <template v-if="row.cells[m.metric].items.length > 1">
+                    <div v-for="(it, i) in row.cells[m.metric].items" :key="i" class="sub-line" :class="'sub-' + it.status">
+                      <span class="sub-name">{{ it.name }}</span>{{ it.value === null ? '—' : fmtNum(it.value) }}
+                    </div>
+                  </template>
+                  <template v-else-if="row.cells[m.metric].value !== null">
                     {{ fmtNum(row.cells[m.metric].value) }}<small>{{ row.cells[m.metric].unit }}</small>
                   </template>
                   <template v-else>—</template>
                 </td>
                 <td class="col-result">
-                  <el-tag v-if="row.empty === 6" type="info" size="small">未填报</el-tag>
+                  <el-tag v-if="!row.reported" type="info" size="small">未填报</el-tag>
                   <el-tag v-else-if="row.fail" type="danger" size="small">{{ row.fail }} 项未达标</el-tag>
                   <el-tag v-else-if="row.pass === 6" type="success" size="small">全部达标</el-tag>
                   <el-tag v-else type="warning" size="small">已填 {{ 6 - row.empty }}/6</el-tag>
@@ -372,6 +378,22 @@ const trendOption = computed(() => {
 .cell-FAIL { background: var(--dr-fail-bg); color: var(--dr-fail); font-weight: 700; }
 .cell-EMPTY { background: #f8f9fb; color: #b0b6bf; }
 .cell-NO_TARGET { background: #fffbe6; color: #8a6d00; }
+
+.sub-line {
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.sub-name {
+  margin-right: 4px;
+  font-weight: 400;
+  opacity: 0.75;
+}
+
+.sub-PASS { color: #1d7a43; font-weight: 700; }
+.sub-FAIL { color: var(--dr-fail); font-weight: 700; }
+.sub-EMPTY { color: #b0b6bf; font-weight: 400; }
 
 .no-data {
   padding: 24px !important;

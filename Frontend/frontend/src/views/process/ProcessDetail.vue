@@ -9,6 +9,7 @@
         <div class="owner-line">
           负责人：{{ owners || '未分配' }}
           <el-tag v-if="d && d.canEdit" type="success" size="small" effect="dark">可编辑</el-tag>
+          <el-tag v-else-if="d && d.process.deleted" type="danger" size="small" effect="dark">已删除（只读）</el-tag>
           <el-tag v-else-if="d && !d.process.active" type="danger" size="small" effect="dark">已停用（只读）</el-tag>
           <el-tag v-else-if="d" type="info" size="small" effect="dark">只读：你不是该工序负责人</el-tag>
         </div>
@@ -17,6 +18,7 @@
         <el-date-picker id="detail-month" v-model="month" type="month" value-format="YYYY-MM" :clearable="false"
                         :disabled-date="dt => dt > new Date()" @change="onMonthChange" />
         <el-button :icon="TrendCharts" type="primary" @click="router.push({ path: `/processes/${processId}/carousel`, query: { month } })">查看趋势图</el-button>
+        <el-button v-if="d && d.canEdit" :icon="Promotion" type="success" @click="openPush">推送到企业微信</el-button>
         <el-button :icon="Clock" @click="openHistory">修改记录 / 留底</el-button>
       </div>
     </div>
@@ -40,15 +42,21 @@
             </tr>
           </thead>
           <tbody>
+            <!-- 指标名按整项结果着色（拆了子项的：所有子项都达标才算达标）；本班当前每个子项单独着色 -->
             <tr v-for="t in d.targets" :key="t.metric">
-              <td class="cert-metric">{{ t.label }}</td>
+              <td class="cert-metric" :class="'m-' + metricStatusOf(selectedDay, t)" :title="METRIC_TIP[metricStatusOf(selectedDay, t)]">
+                {{ t.label }}
+              </td>
               <td>{{ t.baseline || '—' }}</td>
               <td>{{ t.teamTarget || '—' }}</td>
-              <td :class="'cur-' + statusOf(selectedDay, t.metric)">
-                <template v-if="cellValue(selectedDay, t.metric) !== ''">
-                  {{ cellValue(selectedDay, t.metric) }}{{ t.unit === '%' ? '%' : ' ' + (t.unit || '') }}
-                </template>
-                <span v-else class="muted">未填</span>
+              <td class="cur-cell">
+                <div v-for="it in t.items" :key="it.id" class="cur-line" :class="'cur-' + statusOf(selectedDay, it.id)">
+                  <span v-if="t.items.length > 1" class="cur-name">{{ it.name }}</span>
+                  <template v-if="cellValue(selectedDay, it.id) !== ''">
+                    {{ cellValue(selectedDay, it.id) }}{{ unitText(it.unit) }}
+                  </template>
+                  <span v-else class="muted">未填</span>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -81,22 +89,32 @@
           </div>
         </div>
 
-        <!-- 全员签名、日期：上下两行 -->
-        <div class="sign-block">
-          <div class="sign-row">
-            <span class="sign-label">全员签名：</span>
-            <el-input v-if="boardEditing" id="board-signers" v-model="board.signers" class="sign-input" placeholder="组员姓名，用空格隔开" maxlength="500" />
-            <span v-else class="sign-line">{{ board.signers }}</span>
-          </div>
-          <div class="sign-row">
-            <span class="sign-label">日期：</span>
-            <el-date-picker v-if="boardEditing" id="board-sign-date" v-model="board.signDate" type="date"
-                            value-format="YYYY-MM-DD" class="sign-input" style="width: 100%" />
-            <span v-else class="sign-line num">{{ board.signDate ? board.signDate.replaceAll('-', '.') : '' }}</span>
-          </div>
-        </div>
         <div v-if="d.board && d.board.updatedBy" class="board-meta">
           看板最后保存：{{ d.board.updatedBy }} · {{ fmtTime(d.board.updatedAt) }}
+        </div>
+
+        <!-- 今日行动措施 / 今日亮点 / 明日行动计划：跟着走势表选中的日期走，锁定规则跟走势表一样 -->
+        <div class="notes">
+          <div class="notes-head">
+            <span>行动与亮点<span class="notes-date">{{ monthNum }}月{{ selectedDay }}号</span></span>
+            <template v-if="isEditable(selectedDay)">
+              <el-button v-if="!noteEditing" size="small" @click="startNoteEdit">编辑</el-button>
+              <span v-else class="board-btns">
+                <el-button size="small" @click="noteEditing = false">取消</el-button>
+                <el-button size="small" type="primary" :loading="savingNote" @click="saveNote">保存</el-button>
+              </span>
+            </template>
+            <span v-else-if="d.canEdit && isLocked(selectedDay)" class="notes-lock">🔒 已锁定</span>
+          </div>
+          <div v-for="f in NOTE_FIELDS" :key="f.key" class="note">
+            <div class="note-title">【{{ f.label }}】</div>
+            <el-input v-if="noteEditing" :id="'note-' + f.key" v-model="noteForm[f.key]" type="textarea"
+                      :autosize="{ minRows: 2, maxRows: 8 }" maxlength="1000" :placeholder="f.placeholder" />
+            <div v-else class="note-text" :class="{ muted: !currentNote[f.key] }">{{ currentNote[f.key] || '无' }}</div>
+          </div>
+          <div v-if="currentNote.updatedBy" class="board-meta note-meta">
+            最后保存：{{ currentNote.updatedBy }} · {{ fmtTime(currentNote.updatedAt) }}
+          </div>
         </div>
       </div>
 
@@ -134,21 +152,32 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="m in d.metrics" :key="m.key">
+              <!-- 每个子项一行；拆了子项的指标最后多一行“整项”：所有子项都达标才打 ✓ -->
+              <tr v-for="r in gridRows" :key="r.key" :class="{ 'metric-end': r.last, 'sum-row': r.type === 'sum' }">
                 <!-- 班组目标（参考，放最左边）：填数时直接对照，红绿就是按下面这行小字的规则判定的 -->
-                <td class="goal-cell">
-                  <div class="goal-text">{{ (targetMap[m.key] && targetMap[m.key].teamTarget) || '—' }}</div>
-                  <div class="goal-rule">{{ ruleText(targetMap[m.key]) }}</div>
+                <!-- 班组目标（由子项自动生成）：拆了子项的上面一行是子项名、下面是它的目标 -->
+                <td v-if="r.type === 'item'" class="goal-cell">
+                  <div v-if="r.multi" class="goal-name">{{ r.it.name }}</div>
+                  <div class="goal-text">{{ ruleText(r.it) }}</div>
                 </td>
-                <th class="row-head">{{ m.label }}</th>
-                <td v-for="day in days" :key="day"
-                    :class="['cell', 'st-' + statusOf(day, m.key), { dirty: isDirty(day, m.key), selected: day === selectedDay, locked: d.canEdit && isLocked(day) }]"
-                    :title="cellTitle(day, m.key)">
-                  <input v-if="isEditable(day)" :id="`cell-${day}-${m.key}`" v-model="grid[key(day, m.key)]"
-                         inputmode="decimal" :aria-label="`${monthNum}月${day}号 ${m.label}`"
-                         @focus="selectedDay = day" @change="normalize(day, m.key)" />
-                  <span v-else>{{ grid[key(day, m.key)] }}</span>
-                </td>
+                <td v-else class="goal-cell sum-goal">整项（全部达标）</td>
+                <th v-if="r.first" class="row-head" :rowspan="r.span">{{ r.t.label }}</th>
+                <template v-if="r.type === 'item'">
+                  <td v-for="day in days" :key="day"
+                      :class="['cell', 'st-' + statusOf(day, r.it.id), { dirty: isDirty(day, r.it.id), selected: day === selectedDay, locked: d.canEdit && isLocked(day) }]"
+                      :title="cellTitle(day, r.it.id)">
+                    <input v-if="isEditable(day)" :id="`cell-${day}-${r.it.id}`" v-model="grid[key(day, r.it.id)]"
+                           inputmode="decimal" :aria-label="`${monthNum}月${day}号 ${r.it.label}`"
+                           @focus="selectedDay = day" @change="normalize(day, r.it.id)" />
+                    <span v-else>{{ grid[key(day, r.it.id)] }}</span>
+                  </td>
+                </template>
+                <template v-else>
+                  <td v-for="day in days" :key="day" class="sum-cell" :class="['sum-' + metricStatusOf(day, r.t), { selected: day === selectedDay }]"
+                      :title="METRIC_TIP[metricStatusOf(day, r.t)]">
+                    {{ SUM_MARK[metricStatusOf(day, r.t)] }}
+                  </td>
+                </template>
               </tr>
             </tbody>
           </table>
@@ -159,43 +188,87 @@
           <div v-for="t in d.targets" :key="t.metric" class="chart-card">
             <div class="chart-title">
               <span>{{ t.label }}走势</span>
-              <span class="chart-target">目标 {{ t.compareOp === 'GE' ? '≥' : '≤' }} {{ fmtNum(t.targetValue) }}{{ t.unit }}</span>
+              <span class="chart-target">目标 {{ metricRuleText(t) }}</span>
             </div>
-            <EChart :option="chartOption(t)" height="200px" />
+            <EChart :option="chartOption(t)" :height="chartHeight(t)" />
           </div>
         </div>
       </div>
     </div>
 
     <!-- ================= 编辑六项目标 ================= -->
-    <el-dialog v-model="targetsVisible" title="编辑六项自主保证书" width="860px" top="6vh">
-      <p class="dialog-tip">“公司底线”“班组自定”是给人看的文字；“达标判定”是系统自动判断红绿的规则。</p>
-      <el-table :data="targetForm" border size="small">
-        <el-table-column label="指标" prop="label" width="70" align="center" />
-        <el-table-column label="公司底线" min-width="140">
-          <template #default="{ row }"><el-input v-model="row.baseline" maxlength="100" /></template>
-        </el-table-column>
-        <el-table-column label="班组自定" min-width="140">
-          <template #default="{ row }"><el-input v-model="row.teamTarget" maxlength="100" /></template>
-        </el-table-column>
-        <el-table-column label="单位" width="90">
-          <template #default="{ row }"><el-input v-model="row.unit" maxlength="20" /></template>
-        </el-table-column>
-        <el-table-column label="达标判定（当前值 … 目标值）" width="260">
-          <template #default="{ row }">
-            <div class="judge">
-              <el-select v-model="row.compareOp" style="width: 76px">
+    <el-dialog v-model="targetsVisible" title="编辑六项自主保证书" width="1020px" top="5vh">
+      <p class="dialog-tip">
+        <b>班组目标</b>只在这里填一次：保证书的“班组自定”、走势表、推送都按它显示，系统也按它判红绿。
+        一项可以拆成多个子项（如 成本 → 铜球、锡球），名称只写子项名，目标值填在后面；
+        每个子项单独判定红绿，<b>所有子项都达标，这项才算达标</b>。
+      </p>
+      <div class="tf">
+        <div class="tf-row tf-head">
+          <div>指标</div><div>公司底线</div><div>班组目标：子项名称 / 单位 / 达标判定（当前值 … 目标值）</div>
+        </div>
+        <div v-for="t in targetForm" :key="t.metric" class="tf-row">
+          <div class="tf-metric">{{ t.label }}</div>
+          <div><el-input v-model="t.baseline" maxlength="100" /></div>
+          <div class="tf-items">
+            <div v-for="(it, i) in t.items" :key="it.key" class="tf-item">
+              <el-input :id="`tf-${t.metric}-name-${i}`" v-model="it.name" maxlength="30" style="width: 136px"
+                        :placeholder="t.items.length > 1 ? '子项名称，如 锡球' : '不拆可不填'" />
+              <el-input :id="`tf-${t.metric}-unit-${i}`" v-model="it.unit" maxlength="20" placeholder="单位" style="width: 76px" />
+              <el-select v-model="it.compareOp" style="width: 64px">
                 <el-option label="≤" value="LE" />
                 <el-option label="≥" value="GE" />
               </el-select>
-              <el-input-number v-model="row.targetValue" :controls="false" :precision="4" style="width: 120px" />
+              <el-input-number :id="`tf-${t.metric}-value-${i}`" v-model="it.targetValue" :controls="false" :precision="4" style="width: 110px" />
+              <el-button link type="danger" :disabled="t.items.length === 1" title="至少保留一个子项" @click="t.items.splice(i, 1)">删除</el-button>
             </div>
-          </template>
-        </el-table-column>
-      </el-table>
+            <el-button link type="primary" :icon="Plus" :disabled="t.items.length >= 6" @click="addItem(t)">添加子项</el-button>
+          </div>
+        </div>
+      </div>
       <template #footer>
         <el-button @click="targetsVisible = false">取消</el-button>
         <el-button type="primary" :loading="savingTargets" @click="saveTargets">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- ================= 推送到企业微信 ================= -->
+    <el-dialog v-model="pushVisible" :title="`推送 ${monthNum}月${selectedDay}号 战报到企业微信`" width="640px" top="6vh">
+      <div v-loading="pushLoading">
+        <template v-if="pushData">
+          <div class="push-to">
+            <div><b>发给：</b>
+              <template v-if="pushData.appConfigured">
+                {{ pushData.receivers.length ? pushData.receivers.join('、') : '（没有已登记企业微信账号的人）' }}
+              </template>
+              <span v-else class="muted-text">ID助手未配置</span>
+              <template v-if="pushData.webhookConfigured">，以及战报群（群机器人）</template>
+            </div>
+            <div v-if="pushData.missing.length" class="warn-text">
+              没登记企业微信账号、收不到：{{ pushData.missing.join('、') }}（管理员在“用户管理”里填）
+            </div>
+            <div v-if="!pushData.appConfigured && !pushData.webhookConfigured" class="warn-text">
+              企业微信推送还没配置好，请联系管理员在“系统设置”里配置。
+            </div>
+          </div>
+          <div class="push-preview">
+            <div v-for="(line, i) in previewLines" :key="i" class="pv-line" :class="{ quote: line.quote, blank: !line.parts.length }">
+              <template v-for="(part, j) in line.parts" :key="j">
+                <a v-if="part.href" :href="part.href" target="_blank" rel="noopener">{{ part.text }}</a>
+                <span v-else :class="[part.color ? 'pv-' + part.color : '', { 'pv-bold': part.bold }]">{{ part.text }}</span>
+              </template>
+            </div>
+          </div>
+          <div v-if="pushData.history.length" class="push-history">
+            这一天已推送 {{ pushData.history.filter(h => h.success).length }} 次，最近一次：
+            {{ fmtTime(pushData.history[0].createdAt) }} · {{ pushData.history[0].operator }} ·
+            <span :class="pushData.history[0].success ? 'ok-text' : 'warn-text'">{{ pushData.history[0].success ? '成功' : '失败' }}</span>
+          </div>
+        </template>
+      </div>
+      <template #footer>
+        <el-button @click="pushVisible = false">取消</el-button>
+        <el-button type="success" :loading="pushing" :disabled="!pushData" @click="doPush">确认推送</el-button>
       </template>
     </el-dialog>
 
@@ -232,11 +305,11 @@
                 &nbsp;<el-tag size="small" type="danger">未达标 {{ s.parsed.fail }}</el-tag>
               </template>
               <el-table :data="s.parsed.items" size="small" border>
-                <el-table-column label="指标" prop="label" width="60" />
+                <el-table-column label="指标" prop="label" width="96" />
                 <el-table-column label="数值" width="90">
                   <template #default="{ row }">{{ row.value === null ? '—' : fmtNum(row.value) + (row.unit || '') }}</template>
                 </el-table-column>
-                <el-table-column label="班组自定" prop="teamTarget" min-width="100" />
+                <el-table-column label="班组目标" prop="teamTarget" min-width="100" />
                 <el-table-column label="结果" width="80">
                   <template #default="{ row }">
                     <span :class="'txt-' + row.status">{{ STATUS_TEXT[row.status] }}</span>
@@ -258,11 +331,23 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Clock, TrendCharts } from '@element-plus/icons-vue'
+import { Clock, Plus, Promotion, TrendCharts } from '@element-plus/icons-vue'
 import api from '@/api'
 import EChart from '@/components/EChart.vue'
 import ImageUpload from '@/components/ImageUpload.vue'
 import { fmtNum, fmtTime, todayStr, STATUS_TEXT } from '@/utils/format'
+import { combine, escapeHtml, groupByUnit, judge, metricRuleText, ruleText, SERIES_COLORS } from '@/utils/metric'
+
+/** “整项”那一行的标记 */
+const SUM_MARK = { PASS: '✓', FAIL: '✗', EMPTY: '', NO_TARGET: '', INVALID: '?' }
+const METRIC_TIP = {
+  PASS: '这一项达标（所有子项都达标）',
+  FAIL: '这一项未达标（有子项未达标）',
+  EMPTY: '这一项还没填完',
+  NO_TARGET: '有子项还没设判定值',
+  INVALID: '有格子不是有效数字'
+}
+const unitText = unit => (!unit ? '' : unit === '%' ? '%' : ' ' + unit)
 
 const route = useRoute()
 const router = useRouter()
@@ -284,11 +369,30 @@ const monthNum = computed(() => Number(month.value.slice(5)))
 const days = computed(() => (d.value ? Array.from({ length: d.value.daysInMonth }, (_, i) => i + 1) : []))
 
 // ---------------- 走势表数据 ----------------
-// grid / original：key = "日|指标" → 输入框里的文字；original 用来判断哪些格子改过
+// grid / original：key = "日|子项id" → 输入框里的文字；original 用来判断哪些格子改过
 const grid = reactive({})
 const original = reactive({})
 const meta = reactive({})
-const key = (day, metric) => `${day}|${metric}`
+const key = (day, itemId) => `${day}|${itemId}`
+
+/**
+ * 走势表的行：每个子项一行；拆了子项的指标最后再加一行“整项”。
+ * first / span 用来让“指标”那一格跨行合并，last 用来画指标之间的分隔线。
+ */
+const gridRows = computed(() => {
+  if (!d.value) return []
+  const rows = []
+  for (const t of d.value.targets) {
+    const multi = t.items.length > 1
+    const span = t.items.length + (multi ? 1 : 0)
+    t.items.forEach((it, i) => rows.push({
+      key: 'i' + it.id, type: 'item', t, it, multi, first: i === 0, span, last: !multi && i === t.items.length - 1
+    }))
+    if (multi) rows.push({ key: 's' + t.metric, type: 'sum', t, multi, first: false, span, last: true })
+  }
+  return rows
+})
+const itemMap = computed(() => Object.fromEntries((d.value ? d.value.targets : []).flatMap(t => t.items).map(it => [it.id, it])))
 const dateOf = day => `${month.value}-${String(day).padStart(2, '0')}`
 // “今天”以服务器日期为准（后端也按服务器日期判断），没加载到时先用本机日期
 const serverToday = computed(() => (d.value && d.value.today ? String(d.value.today) : today))
@@ -332,57 +436,50 @@ function fillGrid() {
   for (const k of Object.keys(original)) delete original[k]
   for (const k of Object.keys(meta)) delete meta[k]
   for (const day of days.value) {
-    for (const m of d.value.metrics) {
-      grid[key(day, m.key)] = ''
-      original[key(day, m.key)] = ''
+    for (const id of Object.keys(itemMap.value)) {
+      grid[key(day, id)] = ''
+      original[key(day, id)] = ''
     }
   }
   for (const r of d.value.records) {
-    const k = key(Number(String(r.date).slice(8)), r.metric)
+    const k = key(Number(String(r.date).slice(8)), r.itemId)
     grid[k] = fmtNum(r.value)
     original[k] = fmtNum(r.value)
     meta[k] = r
   }
 }
 
-const cellValue = (day, metric) => (grid[key(day, metric)] || '').trim()
-const isDirty = (day, metric) => (grid[key(day, metric)] || '').trim() !== original[key(day, metric)]
-const dirtyKeys = computed(() => Object.keys(grid).filter(k => (grid[k] || '').trim() !== original[k]))
+const cellValue = (day, itemId) => (grid[key(day, itemId)] || '').trim()
+const isDirty = (day, itemId) => (grid[key(day, itemId)] || '').trim() !== (original[key(day, itemId)] || '')
+const dirtyKeys = computed(() => Object.keys(grid).filter(k => (grid[k] || '').trim() !== (original[k] || '')))
 const dirtyCount = computed(() => dirtyKeys.value.length)
 
-const targetMap = computed(() => Object.fromEntries((d.value ? d.value.targets : []).map(t => [t.metric, t])))
-
-/** 系统判定红绿用的规则，如“达标 ≤ 2.6%” */
-function ruleText(t) {
-  if (!t || t.targetValue === null || t.targetValue === undefined) return '未设判定值'
-  return `达标 ${t.compareOp === 'GE' ? '≥' : '≤'} ${fmtNum(t.targetValue)}${t.unit || ''}`
-}
-
-/** 跟后端同一套判定：LE 当前值 ≤ 目标为达标，GE 当前值 ≥ 目标为达标 */
-function statusOf(day, metric) {
-  const raw = cellValue(day, metric)
+/** 某天某个子项的结果（跟后端同一套判定），输入框里不是数字时为 INVALID */
+function statusOf(day, itemId) {
+  const raw = cellValue(day, itemId)
   if (raw === '') return 'EMPTY'
   const v = Number(raw)
   if (Number.isNaN(v)) return 'INVALID'
-  const t = targetMap.value[metric]
-  if (!t || t.targetValue === null || t.targetValue === undefined) return 'NO_TARGET'
-  return (t.compareOp === 'GE' ? v >= t.targetValue : v <= t.targetValue) ? 'PASS' : 'FAIL'
+  return judge(v, itemMap.value[itemId])
 }
 
-function cellTitle(day, metric) {
-  const r = meta[key(day, metric)]
+/** 某天一整项指标的结果：所有子项都达标才算达标 */
+const metricStatusOf = (day, t) => combine(t.items.map(it => statusOf(day, it.id)))
+
+function cellTitle(day, itemId) {
+  const r = meta[key(day, itemId)]
   const lines = []
   if (r) {
     lines.push(`首次填报：${r.createdBy || '—'}  ${fmtTime(r.createdAt)}`)
     lines.push(`最后保存：${r.updatedBy || '—'}  ${fmtTime(r.updatedAt)}`)
   }
-  if (isDirty(day, metric)) lines.push(`未保存（原值：${original[key(day, metric)] || '空'}）`)
+  if (isDirty(day, itemId)) lines.push(`未保存（原值：${original[key(day, itemId)] || '空'}）`)
   return lines.join('\n')
 }
 
 /** 输入框失焦时整理一下：全角转半角、去空格 */
-function normalize(day, metric) {
-  const k = key(day, metric)
+function normalize(day, itemId) {
+  const k = key(day, itemId)
   grid[k] = (grid[k] || '').replace(/[０-９．－]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xfee0)).replace('。', '.').trim()
 }
 
@@ -394,13 +491,15 @@ const savingGrid = ref(false)
 async function saveGrid() {
   const cells = []
   for (const k of dirtyKeys.value) {
-    const [day, metric] = k.split('|')
+    const [day, itemId] = k.split('|')
     const raw = (grid[k] || '').trim()
+    const item = itemMap.value[itemId]
+    if (!item) continue // 子项刚被删掉，这一格不用保存
     if (raw !== '' && Number.isNaN(Number(raw))) {
-      ElMessage.error(`${monthNum.value}月${day}号 ${targetMap.value[metric].label} 不是有效数字：${raw}`)
+      ElMessage.error(`${monthNum.value}月${day}号 ${item.label} 不是有效数字：${raw}`)
       return
     }
-    cells.push({ date: dateOf(Number(day)), metric, value: raw === '' ? null : Number(raw) })
+    cells.push({ date: dateOf(Number(day)), itemId: Number(itemId), value: raw === '' ? null : Number(raw) })
   }
   savingGrid.value = true
   try {
@@ -465,21 +564,59 @@ const targetsVisible = ref(false)
 const savingTargets = ref(false)
 const targetForm = ref([])
 
+let itemSeq = 0
 function openTargets() {
-  targetForm.value = d.value.targets.map(t => ({ ...t, targetValue: t.targetValue ?? undefined }))
+  targetForm.value = d.value.targets.map(t => ({
+    metric: t.metric,
+    label: t.label,
+    baseline: t.baseline,
+    items: t.items.map(it => ({ ...it, key: 'k' + it.id, targetValue: it.targetValue ?? undefined }))
+  }))
   targetsVisible.value = true
 }
 
+function addItem(t) {
+  const last = t.items[t.items.length - 1]
+  // 新子项默认沿用上一个的单位和判定方向，通常同一项的子项是同一类
+  t.items.push({ id: null, key: 'n' + ++itemSeq, name: '', unit: last ? last.unit : '', compareOp: last ? last.compareOp : 'LE', targetValue: undefined })
+}
+
 async function saveTargets() {
+  for (const t of targetForm.value) {
+    const names = t.items.map(it => (it.name || '').trim())
+    if (t.items.length > 1 && names.some(n => !n)) {
+      ElMessage.warning(`“${t.label}”拆成了 ${t.items.length} 个子项，每个子项都要填名称（如 锡球、铜球）`)
+      return
+    }
+    if (new Set(names.filter(Boolean)).size !== names.filter(Boolean).length) {
+      ElMessage.warning(`“${t.label}”的子项名称有重复`)
+      return
+    }
+  }
+  // 删掉的子项如果已经填过数据，提醒一下：数据不会丢，只是页面上不再显示
+  const kept = new Set(targetForm.value.flatMap(t => t.items.map(it => it.id)).filter(Boolean))
+  const removed = d.value.targets.flatMap(t => t.items).filter(it => !kept.has(it.id))
+  if (removed.length) {
+    try {
+      await ElMessageBox.confirm(
+        `要删除子项：${removed.map(it => it.label).join('、')}。删除后走势表和图表里不再显示，已经填过的数据会保留在系统里（修改记录可查）。确定吗？`,
+        '删除子项', { type: 'warning', confirmButtonText: '确定删除', cancelButtonText: '再想想' })
+    } catch {
+      return
+    }
+  }
   savingTargets.value = true
   try {
     const res = await api.saveTargets(processId, targetForm.value.map(t => ({
       metric: t.metric,
-      baseline: t.baseline,
-      teamTarget: t.teamTarget,
-      unit: t.unit,
-      compareOp: t.compareOp,
-      targetValue: t.targetValue === undefined ? null : t.targetValue
+      baseline: t.baseline, // 班组目标由子项生成，不传文字，库里原来写的保持不变
+      items: t.items.map(it => ({
+        id: it.id || null,
+        name: (it.name || '').trim() || null,
+        unit: it.unit,
+        compareOp: it.compareOp,
+        targetValue: it.targetValue === undefined ? null : it.targetValue
+      }))
     })))
     if (!res.success) {
       ElMessage.error(res.message)
@@ -489,14 +626,56 @@ async function saveTargets() {
     targetsVisible.value = false
     const dirty = Object.fromEntries(dirtyKeys.value.map(k => [k, grid[k]]))
     await load()
-    Object.assign(grid, dirty) // 保留走势表里还没保存的输入
+    // 保留走势表里还没保存的输入（被删掉的子项那几格不要了）
+    for (const [k, v] of Object.entries(dirty)) {
+      if (k in grid) grid[k] = v
+    }
   } finally {
     savingTargets.value = false
   }
 }
 
-// ---------------- 班组看板：四功能小组四个人 + 全员签名 + 日期 ----------------
-const board = reactive({ members: [], signers: '', signDate: '' })
+// ---------------- 今日行动措施 / 今日亮点 / 明日行动计划 ----------------
+const NOTE_FIELDS = [
+  { key: 'actions', label: '今日行动措施', placeholder: '如：1.结存不足，找前站要板，提升机台嫁动率' },
+  { key: 'highlights', label: '今日亮点', placeholder: '没有可以不填' },
+  { key: 'plans', label: '明日行动计划', placeholder: '如：1.重点提升机台嫁动率' }
+]
+const currentNote = computed(() => {
+  const date = dateOf(selectedDay.value)
+  return (d.value && (d.value.notes || []).find(n => String(n.reportDate) === date)) || {}
+})
+const noteEditing = ref(false)
+const savingNote = ref(false)
+const noteForm = reactive({ actions: '', highlights: '', plans: '' })
+
+function startNoteEdit() {
+  for (const f of NOTE_FIELDS) noteForm[f.key] = currentNote.value[f.key] || ''
+  noteEditing.value = true
+}
+
+// 换了日期就退出编辑，免得把这天写的内容存到另一天
+watch(selectedDay, () => { noteEditing.value = false })
+
+async function saveNote() {
+  savingNote.value = true
+  try {
+    const res = await api.saveNote(processId, { date: dateOf(selectedDay.value), ...noteForm })
+    if (!res.success) {
+      ElMessage.error(res.message)
+      return
+    }
+    ElMessage.success(res.message)
+    const res2 = await api.detail(processId, month.value)
+    if (res2.success) d.value.notes = res2.data.notes
+    noteEditing.value = false
+  } finally {
+    savingNote.value = false
+  }
+}
+
+// ---------------- 班组看板：四功能小组四个人 ----------------
+const board = reactive({ members: [] })
 const boardEditing = ref(false)
 const savingBoard = ref(false)
 
@@ -509,13 +688,10 @@ function resetBoard() {
     name: (saved[i] && saved[i].name) || '',
     role: (saved[i] && saved[i].role) || ''
   }))
-  board.signers = b.signers || ''
-  board.signDate = b.signDate || ''
 }
 
 function startBoardEdit() {
   resetBoard()
-  if (!board.signDate) board.signDate = today
   boardEditing.value = true
 }
 
@@ -527,9 +703,7 @@ async function saveBoard() {
   savingBoard.value = true
   try {
     const body = {
-      members: board.members.map(m => ({ photo: m.photo || null, name: m.name || null, role: m.role || null })),
-      signers: board.signers || null,
-      signDate: board.signDate || null
+      members: board.members.map(m => ({ photo: m.photo || null, name: m.name || null, role: m.role || null }))
     }
     const res = await api.saveBoard(processId, body)
     if (!res.success) {
@@ -546,46 +720,146 @@ async function saveBoard() {
 }
 
 // ---------------- 折线图 ----------------
+// 每个子项一条线；单位一样的子项画在同一张图里，单位不一样的上下分开画（刻度差太多会挤成一条线）
+const CHART_PART = 150 // 分开画时每张小图的高度
+
+function chartHeight(t) {
+  const n = groupByUnit(t.items).length
+  if (n > 1) return n * CHART_PART + 30 + 'px'
+  return t.items.length > 1 ? '224px' : '200px'
+}
+
 function chartOption(t) {
-  const values = days.value.map(day => {
-    const raw = cellValue(day, t.metric)
-    return raw === '' || Number.isNaN(Number(raw)) ? null : Number(raw)
+  const multi = t.items.length > 1
+  const groups = groupByUnit(t.items)
+  const legendTop = multi ? 24 : 0
+  const partHeight = groups.length > 1 ? CHART_PART : 200 - 16 - 26
+  const xData = days.value.map(day => day + '号')
+  const grids = [], xAxis = [], yAxis = [], series = []
+  groups.forEach((g, gi) => {
+    const top = 16 + legendTop + gi * partHeight
+    grids.push({ left: 44, right: 16, top, height: partHeight - (groups.length > 1 ? 30 : 0) })
+    xAxis.push({
+      type: 'category', data: xData, gridIndex: gi, boundaryGap: false,
+      axisLabel: { interval: 4, show: gi === groups.length - 1 }
+    })
+    // 安全（事故起数）、品质（流出片数）是计数，刻度只取整数
+    yAxis.push({
+      type: 'value', gridIndex: gi, scale: true,
+      name: groups.length > 1 ? g.unit : '', nameTextStyle: { color: '#8a96a3', align: 'left' },
+      minInterval: ['SAFETY', 'QUALITY'].includes(t.metric) ? 1 : undefined,
+      splitLine: { lineStyle: { color: '#eef0f3' } }
+    })
+    for (const it of g.items) {
+      const color = multi ? SERIES_COLORS[t.items.indexOf(it) % SERIES_COLORS.length] : '#0070c0'
+      const hasTarget = it.targetValue !== null && it.targetValue !== undefined
+      series.push({
+        type: 'line',
+        name: it.name || t.label,
+        color, // 图例的颜色
+        xAxisIndex: gi,
+        yAxisIndex: gi,
+        data: days.value.map(day => {
+          const raw = cellValue(day, it.id)
+          return raw === '' || Number.isNaN(Number(raw)) ? null : Number(raw)
+        }),
+        connectNulls: true,
+        symbolSize: 7,
+        lineStyle: { width: 2, color },
+        // 未达标的点标红：每个子项按自己的目标判定
+        itemStyle: { color: p => (judge(p.value ?? null, it) === 'FAIL' ? '#e23b3b' : color) },
+        markLine: !hasTarget ? undefined : {
+          symbol: 'none',
+          lineStyle: { type: 'dashed', color: multi ? color : '#e6a23c' },
+          label: { show: false }, // 目标值已经写在图表标题右侧
+          tooltip: { show: false },
+          data: [{ yAxis: it.targetValue }]
+        }
+      })
+    }
   })
-  const pass = v => t.targetValue === null || t.targetValue === undefined || (t.compareOp === 'GE' ? v >= t.targetValue : v <= t.targetValue)
   return {
-    grid: { left: 44, right: 16, top: 16, bottom: 26 },
+    grid: grids,
+    legend: multi ? { top: 0, itemHeight: 8, textStyle: { fontSize: 12 } } : undefined,
     tooltip: {
       trigger: 'axis',
       formatter: ps => {
-        const p = ps[0]
-        return p.value === null || p.value === undefined ? `${p.name}：未填` : `${p.name}：${p.value}${t.unit || ''}`
+        const lines = ps.map(p => {
+          const it = t.items.find(x => (x.name || t.label) === p.seriesName) || {}
+          const val = p.value === null || p.value === undefined ? '未填' : p.value + (it.unit || '')
+          return multi ? `${p.marker}${escapeHtml(p.seriesName)}：${escapeHtml(val)}` : escapeHtml(val)
+        })
+        return multi ? `${ps[0].name}<br/>${lines.join('<br/>')}` : `${ps[0].name}：${lines[0]}`
       }
     },
-    xAxis: { type: 'category', data: days.value.map(day => day + '号'), axisLabel: { interval: 4 }, boundaryGap: false },
-    // 安全（事故起数）、品质（流出片数）是计数，刻度只取整数
-    yAxis: {
-      type: 'value',
-      scale: true,
-      minInterval: ['SAFETY', 'QUALITY'].includes(t.metric) ? 1 : undefined,
-      splitLine: { lineStyle: { color: '#eef0f3' } }
-    },
-    series: [{
-      type: 'line',
-      data: values,
-      connectNulls: true,
-      symbolSize: 7,
-      lineStyle: { width: 2, color: '#0070c0' },
-      itemStyle: { color: p => (p.value !== null && p.value !== undefined && !pass(p.value) ? '#e23b3b' : '#0070c0') },
-      markLine: t.targetValue === null || t.targetValue === undefined ? undefined : {
-        symbol: 'none',
-        lineStyle: { type: 'dashed', color: '#e6a23c' },
-        label: { show: false }, // 目标值已经写在图表标题右侧
-        tooltip: { show: false },
-        data: [{ yAxis: t.targetValue }]
-      }
-    }]
+    xAxis,
+    yAxis,
+    series
   }
 }
+
+// ---------------- 推送到企业微信 ----------------
+const pushVisible = ref(false)
+const pushLoading = ref(false)
+const pushing = ref(false)
+const pushData = ref(null)
+
+async function openPush() {
+  if (dirtyCount.value) {
+    ElMessage.warning('走势表还有没保存的修改，先保存再推送')
+    return
+  }
+  pushVisible.value = true
+  pushLoading.value = true
+  pushData.value = null
+  try {
+    const res = await api.pushPreview(processId, dateOf(selectedDay.value))
+    if (res.success) pushData.value = res.data
+    else ElMessage.error(res.message)
+  } finally {
+    pushLoading.value = false
+  }
+}
+
+async function doPush() {
+  pushing.value = true
+  try {
+    const res = await api.pushProcess(processId, dateOf(selectedDay.value))
+    if (res.success) {
+      ElMessage.success({ message: res.message, duration: 5000 })
+      pushVisible.value = false
+    } else {
+      ElMessage.error({ message: res.message, duration: 8000 })
+    }
+  } finally {
+    pushing.value = false
+  }
+}
+
+/**
+ * 把企业微信 markdown 拆成一段段文字来显示（不当 HTML 渲染，防注入）：
+ * 支持 <font color="info|warning|comment">、**加粗**、[文字](链接)、以“> ”开头的引用行
+ */
+const previewLines = computed(() => {
+  if (!pushData.value) return []
+  const re = /<font color="(\w+)">(.*?)<\/font>|\*\*(.*?)\*\*|\[(.*?)\]\((.*?)\)/g
+  return pushData.value.content.split('\n').map(raw => {
+    const quote = raw.startsWith('> ')
+    const text = quote ? raw.slice(2) : raw
+    const parts = []
+    let last = 0
+    let m
+    while ((m = re.exec(text))) {
+      if (m.index > last) parts.push({ text: text.slice(last, m.index) })
+      if (m[1]) parts.push({ text: m[2], color: m[1] })
+      else if (m[3] !== undefined) parts.push({ text: m[3], bold: true })
+      else parts.push({ text: m[4], href: m[5] })
+      last = re.lastIndex
+    }
+    if (last < text.length) parts.push({ text: text.slice(last) })
+    return { quote, parts }
+  })
+})
 
 // ---------------- 修改记录 / 留底 ----------------
 const historyVisible = ref(false)
@@ -724,14 +998,39 @@ function shortVal(v) {
 .cert-metric {
   background: #edf3f9;
   font-weight: 700;
+  white-space: nowrap; /* 班组自定文字长的时候，指标名也别被挤成竖排 */
+}
+
+.cert thead th {
+  white-space: nowrap;
 }
 
 .cert tbody tr:nth-child(even) td:not(.cert-metric) {
   background: #f7fafc;
 }
 
+/* 指标名按整项结果着色：所有子项都达标才是绿色 */
+.cert-metric.m-PASS { background: var(--dr-pass-bg); color: #1d7a43; }
+.cert-metric.m-FAIL { background: var(--dr-fail-bg); color: var(--dr-fail); }
+
+/* 本班当前：每个子项一行，各自着色 */
+.cur-cell { padding: 3px 8px; }
+.cur-line { line-height: 1.5; white-space: nowrap; }
+.cur-name {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 400;
+  background: #eef2f6;
+  color: #5c6b7a;
+}
+
 .cur-PASS { color: var(--dr-pass); font-weight: 700; }
 .cur-FAIL { color: var(--dr-fail); font-weight: 700; }
+.cur-FAIL .cur-name { background: var(--dr-fail-bg); color: var(--dr-fail); }
+.cur-PASS .cur-name { background: var(--dr-pass-bg); color: #1d7a43; }
 .muted { color: #b0b6bf; }
 
 /* ---------- 班组看板（截图左下蓝色区域） ---------- */
@@ -808,45 +1107,67 @@ function shortVal(v) {
   text-overflow: ellipsis;
 }
 
-/* 全员签名、日期：上下两行 */
-.sign-block {
-  display: grid;
-  gap: 14px;
-  padding: 18px 14px 8px;
+.board-meta {
+  padding: 4px 14px 10px;
+  background: var(--dr-blue-bright);
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+/* 今日行动措施 / 今日亮点 / 明日行动计划 */
+.notes {
+  padding: 10px 14px 12px;
   background: #f5f8fa;
 }
 
-.sign-row {
+.notes-head {
   display: flex;
-  align-items: flex-end;
-  gap: 6px;
-  font-size: 14px;
-  color: #4a5562;
-}
-
-.sign-label {
-  flex-shrink: 0;
-  width: 5em;
-  text-align: right;
-}
-
-.sign-line {
-  flex: 1;
-  min-width: 0;
-  min-height: 22px;
-  border-bottom: 1px solid #333;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-weight: 700;
   color: #1f2d3d;
 }
 
-.sign-input {
-  flex: 1;
-  min-width: 0;
+.notes-date {
+  margin-left: 8px;
+  padding: 0 8px;
+  border-radius: 10px;
+  background: #ffb020;
+  color: #10244d;
+  font-size: 12px;
+  font-weight: 600;
 }
 
-.board-meta {
-  padding: 4px 14px 10px;
-  background: #f5f8fa;
+.notes-lock {
   font-size: 12px;
+  font-weight: 400;
+  color: #d48806;
+}
+
+.note + .note {
+  margin-top: 8px;
+}
+
+.note-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0a5a9a;
+  margin-bottom: 2px;
+}
+
+.note-text {
+  font-size: 14px;
+  line-height: 1.7;
+  color: #1f2d3d;
+  white-space: pre-wrap; /* 保留换行：1. 2. 分行写 */
+  word-break: break-word;
+}
+
+.note-meta {
+  margin-top: 8px;
+  padding: 0;
+  background: none;
   color: #8a96a3;
 }
 
@@ -959,10 +1280,13 @@ function shortVal(v) {
   text-overflow: ellipsis;
 }
 
-.goal-rule {
+.goal-name {
   font-size: 11px;
+  font-weight: 600;
   color: #b07d10;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .day-head {
@@ -1030,6 +1354,34 @@ function shortVal(v) {
 .st-NO_TARGET { background: #fffbe6; }
 .st-INVALID { background: #ffe58f; color: #ad4e00; }
 
+/* 拆了子项的指标：最后一行“整项”，所有子项都达标打 ✓（绿），有子项未达标打 ✗（红） */
+.sum-row td {
+  height: 22px;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  border: 1px solid #b9d7bc;
+}
+
+.sum-goal {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  color: #7a5200;
+  background: #fbefcf !important;
+}
+
+.sum-cell { background: #f7f9f7; color: #b0b6bf; }
+.sum-cell.selected { box-shadow: inset 0 0 0 2px #ffb020; }
+.sum-PASS { background: #c9ecd5; color: #1d7a43; }
+.sum-FAIL { background: #f7c4c4; color: var(--dr-fail); }
+.sum-INVALID { background: #ffe58f; color: #ad4e00; }
+
+/* 指标之间画一条粗一点的分隔线，拆了子项的几行看得出是一组 */
+.metric-end td,
+.metric-end th {
+  border-bottom: 2px solid #6fa77a !important;
+}
+
 .cell.dirty {
   position: relative;
 }
@@ -1072,6 +1424,49 @@ function shortVal(v) {
   color: #b7791f;
 }
 
+/* ---------- 推送到企业微信 ---------- */
+.push-to {
+  font-size: 13px;
+  line-height: 1.7;
+  margin-bottom: 10px;
+}
+
+.push-preview {
+  padding: 12px 14px;
+  border-radius: 6px;
+  background: #f4f6f9;
+  border: 1px solid #e3e7ee;
+  font-size: 14px;
+  line-height: 1.7;
+  max-height: 52vh;
+  overflow: auto;
+}
+
+.pv-line.quote {
+  padding-left: 10px;
+  border-left: 3px solid #d0d7e2;
+  color: #4a5562;
+}
+
+.pv-line.blank {
+  height: 10px;
+}
+
+.pv-bold { font-weight: 700; }
+.pv-info { color: #2e9e5b; }
+.pv-warning { color: #e6a23c; }
+.pv-comment { color: #8a96a3; }
+
+.push-history {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #8a96a3;
+}
+
+.warn-text { color: #d48806; }
+.ok-text { color: #2e9e5b; }
+.muted-text { color: #a0a8b3; }
+
 /* ---------- 弹窗 / 抽屉 ---------- */
 .dialog-tip {
   margin: 0 0 12px;
@@ -1079,8 +1474,51 @@ function shortVal(v) {
   color: #6b7785;
 }
 
-.judge {
+/* 编辑六项目标：每项一行，右边是子项列表 */
+.tf {
+  border: 1px solid var(--dr-border);
+  border-radius: 4px;
+  max-height: 64vh;
+  overflow: auto;
+}
+
+.tf-row {
+  display: grid;
+  grid-template-columns: 56px 170px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 8px 10px;
+  border-bottom: 1px solid #eef0f3;
+}
+
+.tf-row:last-child { border-bottom: none; }
+
+.tf-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f5f7fa;
+  font-size: 13px;
+  font-weight: 700;
+  color: #4a5562;
+}
+
+.tf-metric {
+  line-height: 32px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.tf-items {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.tf-item {
+  display: flex;
+  align-items: center;
   gap: 6px;
 }
 

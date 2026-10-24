@@ -11,20 +11,21 @@ import java.sql.Date;
 import java.time.LocalDate;
 import java.util.List;
 
-// 【每日走势表数据】dbo.DAILY_RECORD
+// 【每日走势表数据】dbo.DAILY_RECORD：一格 = 某工序某天某个子项
 @Repository
 public class RecordMapper {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
-    private static final String COLUMNS = "ID, PROCESS_ID, REPORT_DATE, METRIC, METRIC_VALUE, CREATED_BY, CREATED_AT, UPDATED_BY, UPDATED_AT";
+    private static final String COLUMNS = "ID, PROCESS_ID, REPORT_DATE, METRIC, ITEM_ID, METRIC_VALUE, CREATED_BY, CREATED_AT, UPDATED_BY, UPDATED_AT";
 
     private static final RowMapper<DailyRecord> ROW_MAPPER = (rs, i) -> new DailyRecord(
             rs.getLong("ID"),
             rs.getInt("PROCESS_ID"),
             RowUtils.date(rs, "REPORT_DATE"),
             Metric.valueOf(rs.getString("METRIC")),
+            rs.getInt("ITEM_ID"),
             RowUtils.decimal(rs, "METRIC_VALUE"),
             rs.getString("CREATED_BY"),
             RowUtils.dateTime(rs, "CREATED_AT"),
@@ -44,17 +45,16 @@ public class RecordMapper {
                 ROW_MAPPER, Date.valueOf(from), Date.valueOf(to));
     }
 
-    public DailyRecord selectOne(Integer processId, LocalDate date, Metric metric) {
-        List<DailyRecord> list = jdbcTemplate.query("SELECT " + COLUMNS + " FROM dbo.DAILY_RECORD " +
-                        "WHERE PROCESS_ID = ? AND REPORT_DATE = ? AND METRIC = ?",
-                ROW_MAPPER, processId, Date.valueOf(date), metric.name());
+    public DailyRecord selectOne(Integer itemId, LocalDate date) {
+        List<DailyRecord> list = jdbcTemplate.query("SELECT " + COLUMNS + " FROM dbo.DAILY_RECORD WHERE ITEM_ID = ? AND REPORT_DATE = ?",
+                ROW_MAPPER, itemId, Date.valueOf(date));
         return list.isEmpty() ? null : list.get(0);
     }
 
-    public void insert(Integer processId, LocalDate date, Metric metric, Double value, String operator) {
-        jdbcTemplate.update("INSERT INTO dbo.DAILY_RECORD (PROCESS_ID, REPORT_DATE, METRIC, METRIC_VALUE, CREATED_BY, CREATED_AT, UPDATED_BY, UPDATED_AT) " +
-                        "VALUES (?, ?, ?, ?, ?, SYSDATETIME(), ?, SYSDATETIME())",
-                processId, Date.valueOf(date), metric.name(), value, operator, operator);
+    public void insert(Integer processId, LocalDate date, Metric metric, Integer itemId, Double value, String operator) {
+        jdbcTemplate.update("INSERT INTO dbo.DAILY_RECORD (PROCESS_ID, REPORT_DATE, METRIC, ITEM_ID, METRIC_VALUE, CREATED_BY, CREATED_AT, UPDATED_BY, UPDATED_AT) " +
+                        "VALUES (?, ?, ?, ?, ?, ?, SYSDATETIME(), ?, SYSDATETIME())",
+                processId, Date.valueOf(date), metric.name(), itemId, value, operator, operator);
     }
 
     public void updateValue(Long id, Double value, String operator) {

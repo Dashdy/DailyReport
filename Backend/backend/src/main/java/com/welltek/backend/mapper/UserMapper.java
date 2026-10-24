@@ -20,7 +20,7 @@ public class UserMapper {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
-    private static final String COLUMNS = "ID, ACCOUNT, USERNAME, PASSWORD, ROLE, ENABLED, REMARK, CREATED_AT, UPDATED_AT";
+    private static final String COLUMNS = "ID, ACCOUNT, USERNAME, PASSWORD, ROLE, ENABLED, REMARK, CREATED_AT, UPDATED_AT, WECOM_USERID";
 
     private static final RowMapper<User> ROW_MAPPER = (rs, i) -> new User(
             rs.getInt("ID"),
@@ -31,7 +31,8 @@ public class UserMapper {
             rs.getBoolean("ENABLED"),
             rs.getString("REMARK"),
             RowUtils.dateTime(rs, "CREATED_AT"),
-            RowUtils.dateTime(rs, "UPDATED_AT"));
+            RowUtils.dateTime(rs, "UPDATED_AT"),
+            rs.getString("WECOM_USERID"));
 
     public User selectById(Integer id) {
         List<User> list = jdbcTemplate.query("SELECT " + COLUMNS + " FROM dbo.SYS_USER WHERE ID = ?", ROW_MAPPER, id);
@@ -76,6 +77,11 @@ public class UserMapper {
     public void update(Integer id, String account, String username, Role role, boolean enabled, String remark) {
         jdbcTemplate.update("UPDATE dbo.SYS_USER SET ACCOUNT = ?, USERNAME = ?, ROLE = ?, ENABLED = ?, REMARK = ?, UPDATED_AT = SYSDATETIME() WHERE ID = ?",
                 account, username, role.name(), enabled, remark, id);
+    }
+
+    /** 企业微信账号（可以为空） */
+    public void updateWecomUserId(Integer id, String wecomUserId) {
+        jdbcTemplate.update("UPDATE dbo.SYS_USER SET WECOM_USERID = ? WHERE ID = ?", wecomUserId, id);
     }
 
     public void updatePassword(Integer id, String encodedPassword) {

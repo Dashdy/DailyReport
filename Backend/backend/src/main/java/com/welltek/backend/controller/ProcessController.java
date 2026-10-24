@@ -6,6 +6,7 @@ import com.welltek.backend.security.AuthInterceptor;
 import com.welltek.backend.security.LoginUser;
 import com.welltek.backend.security.RequireAdmin;
 import com.welltek.backend.service.AuditService;
+import com.welltek.backend.service.PushService;
 import com.welltek.backend.service.ProcessService;
 import com.welltek.backend.service.ReportService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,6 +29,9 @@ public class ProcessController {
 
     @Autowired
     private AuditService auditService;
+
+    @Autowired
+    private PushService pushService;
 
     /** 选项卡页：所有启用的工序 + 指定日期（默认今天）的填报情况 */
     @GetMapping
@@ -57,6 +61,27 @@ public class ProcessController {
                             @PathVariable Integer id, @RequestBody Requests.SaveProcess req) {
         processService.update(op, id, req);
         return ApiResult.ok("工序已保存");
+    }
+
+    /** 删除工序：只做标记，各页面不再显示，数据全部保留 */
+    @RequireAdmin
+    @DeleteMapping("/{id}")
+    public ApiResult delete(@RequestAttribute(AuthInterceptor.CURRENT_USER_ATTR) LoginUser op, @PathVariable Integer id) {
+        processService.delete(op, id);
+        return ApiResult.ok("工序已删除，数据都还保留着，可以在“已删除的工序”里恢复");
+    }
+
+    @RequireAdmin
+    @GetMapping("/deleted")
+    public ApiResult deleted() {
+        return ApiResult.ok("ok", processService.listDeleted());
+    }
+
+    @RequireAdmin
+    @PostMapping("/{id}/restore")
+    public ApiResult restore(@RequestAttribute(AuthInterceptor.CURRENT_USER_ATTR) LoginUser op, @PathVariable Integer id) {
+        processService.restore(op, id);
+        return ApiResult.ok("工序已恢复并启用，记得重新分配负责人");
     }
 
     @RequireAdmin
@@ -98,12 +123,35 @@ public class ProcessController {
         return ApiResult.ok("班组看板已保存");
     }
 
+    /** 某天的 今日行动措施 / 今日亮点 / 明日行动计划 */
+    @PutMapping("/{id}/notes")
+    public ApiResult saveNote(@RequestAttribute(AuthInterceptor.CURRENT_USER_ATTR) LoginUser op,
+                              @PathVariable Integer id, @RequestBody Requests.SaveNote req) {
+        reportService.saveNote(op, id, req);
+        return ApiResult.ok("行动与亮点已保存");
+    }
+
     /** 这道工序的修改记录（填数 / 目标 / 看板），登录用户都能看 */
     @GetMapping("/{id}/logs")
     public ApiResult logs(@PathVariable Integer id,
                           @RequestParam(defaultValue = "1") int page,
                           @RequestParam(defaultValue = "15") int size) {
         return ApiResult.ok("ok", auditService.processPage(processService.requireProcess(id).name(), page, size));
+    }
+
+    /** 企业微信推送预览：消息内容 + 会发给谁 + 今天的推送记录；date 默认今天 */
+    @GetMapping("/{id}/push/preview")
+    public ApiResult pushPreview(@PathVariable Integer id,
+                                 @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return ApiResult.ok("ok", pushService.preview(id, date == null ? LocalDate.now() : date));
+    }
+
+    /** 负责人 / 管理员手动推送这道工序某天的战报 */
+    @PostMapping("/{id}/push")
+    public ApiResult push(@RequestAttribute(AuthInterceptor.CURRENT_USER_ATTR) LoginUser op, @PathVariable Integer id,
+                          @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        String result = pushService.pushProcessManually(op, id, date == null ? LocalDate.now() : date);
+        return result.startsWith("推送失败") ? ApiResult.fail(result) : ApiResult.ok(result);
     }
 
     /** 某天的战报留底版本 */
